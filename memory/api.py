@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from memory.db import MemoryDB
+from db import MemoryDB
 
 app = FastAPI(title="Riven Memory API")
 

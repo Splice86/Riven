@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import Optional
 
-from memory.embedding import EmbeddingModel
+from embedding import EmbeddingModel
 
 DEFAULT_DB_PATH = "memory.db"
 
