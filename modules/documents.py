@@ -55,7 +55,7 @@ class DocumentManager:
         return "\n\n".join(parts)
 
 
-def get_documents_module():
+def get_module():
     """Get the documents module."""
     manager = DocumentManager()
     

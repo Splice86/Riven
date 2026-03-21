@@ -1,69 +1,178 @@
-"""Shell module for riven."""
+"""Shell module for riven - shell command execution."""
 
 import asyncio
+import os
+import signal
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Literal
-from shell import Shell as ShellBase
 
 
 @dataclass
 class ShellResult:
     """Result of a shell command."""
-    exit_code: int
-    stdout: str = ""
-    stderr: str = ""
-    error: str = ""
-    timeout: bool = False
+    success: bool
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    execution_time: float
+    error: str | None = None
+
+    def __repr__(self) -> str:
+        status = "✓" if self.success else "✗"
+        return f"ShellResult({status} exit={self.exit_code} time={self.execution_time:.2f}s)"
 
 
 class Shell:
-    """Shell command executor."""
-    
-    def __init__(self, timeout: int = 60):
+    """Simplified shell command runner for Linux."""
+
+    def __init__(
+        self,
+        timeout: int = 60,
+        cwd: str | None = None,
+    ):
         self.timeout = timeout
-    
+        self.cwd = cwd
+
     async def run(
         self,
         command: str,
+        timeout: int | None = None,
         cwd: str | None = None,
-        timeout: int | None = None
     ) -> ShellResult:
-        """Execute a shell command."""
-        import subprocess
-        
-        timeout_val = timeout or self.timeout
+        """Run a shell command.
+
+        Args:
+            command: The command to execute.
+            timeout: Optional timeout override (seconds).
+            cwd: Optional working directory override.
+
+        Returns:
+            ShellResult with stdout, stderr, exit code, etc.
+        """
+        timeout = timeout or self.timeout
+        cwd = cwd or self.cwd
+
+        if not command or not command.strip():
+            return ShellResult(
+                success=False,
+                stdout="",
+                stderr="",
+                exit_code=None,
+                execution_time=0.0,
+                error="Command cannot be empty"
+            )
+
+        start_time = asyncio.get_event_loop().time()
+
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd
+                cwd=cwd,
+                # Start in new session on Linux for proper process group handling
+                start_new_session=True,
             )
-            
+
             try:
-                stdout, stderr = await asyncio.wait_for(
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     proc.communicate(),
-                    timeout=timeout_val
+                    timeout=timeout
                 )
-                return ShellResult(
-                    exit_code=proc.returncode,
-                    stdout=stdout.decode().strip(),
-                    stderr=stderr.decode().strip()
-                )
+                exit_code = proc.returncode
+
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                # Kill the process group on timeout
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except Exception:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except Exception:
+                        pass
+
+                execution_time = asyncio.get_event_loop().time() - start_time
                 return ShellResult(
-                    exit_code=1,
-                    error=f"Command timed out after {timeout_val}s",
-                    timeout=True
+                    success=False,
+                    stdout="",
+                    stderr="",
+                    exit_code=None,
+                    execution_time=execution_time,
+                    error=f"Command timed out after {timeout}s"
                 )
-        except Exception as e:
+
+            execution_time = asyncio.get_event_loop().time() - start_time
+
             return ShellResult(
-                exit_code=1,
+                success=exit_code == 0,
+                stdout=stdout_bytes.decode("utf-8", errors="replace"),
+                stderr=stderr_bytes.decode("utf-8", errors="replace"),
+                exit_code=exit_code,
+                execution_time=execution_time,
+            )
+
+        except Exception as e:
+            execution_time = asyncio.get_event_loop().time() - start_time
+            return ShellResult(
+                success=False,
+                stdout="",
+                stderr="",
+                exit_code=None,
+                execution_time=execution_time,
                 error=str(e)
             )
 
+    async def run_background(
+        self,
+        command: str,
+        cwd: str | None = None,
+    ) -> tuple[int, str]:
+        """Run a command in background.
+
+        Returns:
+            Tuple of (pid, log_file_path)
+        """
+        cwd = cwd or self.cwd
+
+        # Create temp file for output
+        log_file = tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix="riven_bg_",
+            suffix=".log",
+            delete=False,
+        )
+        log_path = log_file.name
+        log_file.close()
+
+        # Start detached process
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=open(log_path, "w"),
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            cwd=cwd,
+            start_new_session=True,
+        )
+
+        return proc.pid, log_path
+
+
+# Convenience function for quick use
+async def run(
+    command: str,
+    timeout: int = 60,
+    cwd: str | None = None,
+) -> ShellResult:
+    """Quick helper to run a shell command."""
+    shell = Shell(timeout=timeout, cwd=cwd)
+    return await shell.run(command, cwd=cwd)
+
+
+# Module interface for riven
 
 async def run_shell_command(
     command: str,
@@ -71,18 +180,18 @@ async def run_shell_command(
     timeout: int | None = None
 ) -> str:
     """Execute a shell command.
-    
+
     Args:
         command: The shell command to execute.
         cwd: Optional working directory.
         timeout: Optional timeout override in seconds.
-        
+
     Returns:
         Command output with success status.
     """
     shell = Shell()
     result = await shell.run(command, cwd=cwd, timeout=timeout)
-    
+
     output = f"Exit code: {result.exit_code}\n"
     if result.stdout:
         output += f"stdout: {result.stdout}\n"
@@ -93,33 +202,33 @@ async def run_shell_command(
     return output
 
 
-def get_shell_module(timeout: int = 60):
+def get_module(timeout: int = 60):
     """Get the shell module.
-    
+
     Args:
         timeout: Default timeout for shell commands.
-        
+
     Returns:
         Shell Module instance
     """
     from modules import Module
-    
+
     # Create the shell instance for this enrollment
     shell = Shell(timeout=timeout)
-    
+
     async def run_shell(command: str, cwd: str | None = None, timeout: int | None = None) -> str:
         """Execute a shell command.
-        
+
         Args:
             command: The shell command to execute.
             cwd: Optional working directory.
             timeout: Optional timeout override in seconds.
-            
+
         Returns:
             Command output with success status.
         """
         result = await shell.run(command, cwd=cwd, timeout=timeout)
-        
+
         output = f"Exit code: {result.exit_code}\n"
         if result.stdout:
             output += f"stdout: {result.stdout}\n"
@@ -128,7 +237,7 @@ def get_shell_module(timeout: int = 60):
         if result.error:
             output += f"error: {result.error}\n"
         return output
-    
+
     return Module(
         name="shell",
         enrollment=lambda: None,  # Shell setup - can add logging later

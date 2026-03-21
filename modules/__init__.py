@@ -98,5 +98,48 @@ class ModuleRegistry:
         return context
 
 
+# Auto-discover modules from files
+def discover_modules() -> list:
+    """Discover all modules in the modules folder.
+    
+    Each module file should export a get_module() function.
+    
+    Returns:
+        List of Module instances
+    """
+    import os
+    
+    modules = []
+    modules_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    for filename in os.listdir(modules_dir):
+        if filename.startswith('_'):
+            continue
+        if not filename.endswith('.py'):
+            continue
+        
+        module_name = filename[:-3]  # Remove .py
+        
+        # Import the module
+        try:
+            mod = __import__(f'modules.{module_name}', fromlist=['get_module'])
+            if hasattr(mod, 'get_module'):
+                module = mod.get_module()
+                modules.append(module)
+        except Exception as e:
+            print(f"Warning: Failed to load module {module_name}: {e}")
+    
+    return modules
+
+
+def get_all_modules() -> list:
+    """Get all auto-discovered modules.
+    
+    Returns:
+        List of Module instances
+    """
+    return discover_modules()
+
+
 # Global registry
 registry = ModuleRegistry()

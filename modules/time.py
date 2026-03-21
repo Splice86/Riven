@@ -12,7 +12,7 @@ def get_current_time() -> str:
     return datetime.now().isoformat()
 
 
-def get_time_module():
+def get_module():
     """Get the time module.
     
     Returns:
