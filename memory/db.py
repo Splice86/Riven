@@ -1,4 +1,4 @@
-"""Memory database with vector embeddings."""
+"""Memory database with vector embeddings and linked summaries."""
 
 import sqlite3
 import numpy as np
@@ -7,11 +7,12 @@ from typing import Optional
 
 from embedding import EmbeddingModel
 
+
 DEFAULT_DB_PATH = "memory.db"
 
 
 class MemoryDB:
-    """SQLite-based memory storage with vector embeddings."""
+    """SQLite-based memory storage with vector embeddings and link system."""
     
     def __init__(
         self,
@@ -25,7 +26,7 @@ class MemoryDB:
     def _init_db(self):
         """Initialize the database schema."""
         with sqlite3.connect(self.db_path) as conn:
-            # Main memories table
+            # Main memories table (cleaned up)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +34,12 @@ class MemoryDB:
                     role TEXT NOT NULL DEFAULT 'user',
                     embedding BLOB,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    is_summary INTEGER DEFAULT 0,
+                    summary_type TEXT,
+                    original_count INTEGER DEFAULT 0,
+                    last_accessed TEXT,
+                    access_count INTEGER DEFAULT 0
                 )
             """)
             
@@ -56,10 +62,26 @@ class MemoryDB:
                 )
             """)
             
+            # Memory links table - replaces child_ids, allows graph-like relationships
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                    target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                    link_type TEXT NOT NULL,
+                    weight REAL DEFAULT 1.0,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(source_id, target_id, link_type)
+                )
+            """)
+            
             # Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mk_memory ON memory_keywords(memory_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mk_keyword ON memory_keywords(keyword_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_keyword_name ON keywords(name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_links_source ON memory_links(source_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_links_type ON memory_links(link_type)")
             conn.commit()
     
     def add(
@@ -138,11 +160,21 @@ class MemoryDB:
         Returns:
             Dictionary with memory data, or None if not found
         """
+        now = datetime.now(timezone.utc).isoformat()
+        
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
             if not row:
                 return None
+            
+            # Update access stats
+            access_count = (row["access_count"] or 0) + 1
+            conn.execute(
+                "UPDATE memories SET last_accessed = ?, access_count = ? WHERE id = ?",
+                (now, access_count, memory_id)
+            )
+            conn.commit()
             
             keywords = conn.execute(
                 """SELECT k.name FROM keywords k
@@ -151,13 +183,28 @@ class MemoryDB:
                 (memory_id,)
             ).fetchall()
             
+            # Parse child_ids if present
+            child_ids = None
+            if row["child_ids"]:
+                try:
+                    import json
+                    child_ids = json.loads(row["child_ids"])
+                except:
+                    pass
+            
             return {
                 "id": row["id"],
                 "content": row["content"],
                 "role": row["role"],
                 "keywords": [k["name"] for k in keywords],
                 "created_at": row["created_at"],
-                "updated_at": row["updated_at"]
+                "updated_at": row["updated_at"],
+                "is_summary": bool(row["is_summary"]),
+                "level": row["level"] or 0,
+                "parent_id": row["parent_id"],
+                "child_ids": child_ids,
+                "last_accessed": row["last_accessed"],
+                "access_count": access_count
             }
     
     def search_by_keyword(self, keyword: str, limit: int = 10) -> list[dict]:

@@ -98,6 +98,23 @@ class MemoryDB:
             
             return memory_id
 
+    def search(self, query_string: str, limit: int = 50) -> list[dict]:
+        """Search memories using the query DSL.
+        
+        Args:
+            query_string: Search query in DSL format
+            limit: Maximum number of results
+            
+        Returns:
+            List of matching memories with their data
+        
+        See search.py for DSL documentation.
+        """
+        from search import MemorySearcher
+        searcher = MemorySearcher(self.db_path, self.embedding)
+        return searcher.search(query_string, limit)
+
+
 
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     """Initialize the database schema.
