@@ -1,6 +1,7 @@
 """Search parser for memory database query DSL."""
 
 import re
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from dataclasses import dataclass
@@ -489,14 +490,21 @@ class SearchParser:
         elif search_type == SearchType.KEYWORD_SIM:
             # Keyword similarity - use embedding vectors
             # Get matching keyword IDs using vector similarity
+            # Only use vector search if we have a real embedding model
+            use_vector = False
             if self.searcher and self.searcher.embedding:
+                test_emb = self.searcher.embedding.get("test")
+                use_vector = test_emb is not None and np.linalg.norm(test_emb) > 0
+            
+            if use_vector:
                 matching_kw_ids = self.searcher._get_similar_keywords(value)
                 if matching_kw_ids:
                     placeholders = ",".join("?" * len(matching_kw_ids))
                     sql = f" EXISTS (SELECT 1 FROM memory_keywords mk WHERE mk.memory_id = m.id AND mk.keyword_id IN ({placeholders}))"
                     params = matching_kw_ids
                 else:
-                    sql = " 1=0"  # No matches
+                    sql = " 1=0"
+                    params = []
             else:
                 # Fallback to LIKE if no embedding model
                 sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name LIKE ?)"
@@ -504,8 +512,13 @@ class SearchParser:
         
         elif search_type == SearchType.QUERY:
             # Text query - vector similarity search on memory content
+            # Only use vector search if we have a real embedding model
+            use_vector = False
             if self.searcher and self.searcher.embedding:
-                # Get memories with similar content embeddings
+                test_emb = self.searcher.embedding.get("test")
+                use_vector = test_emb is not None and np.linalg.norm(test_emb) > 0
+            
+            if use_vector:
                 matching_memory_ids = self.searcher._get_similar_memories(value)
                 if matching_memory_ids:
                     placeholders = ",".join("?" * len(matching_memory_ids))
@@ -513,6 +526,7 @@ class SearchParser:
                     params = matching_memory_ids
                 else:
                     sql = " 1=0"
+                    params = []
             else:
                 # Fallback to LIKE
                 sql = " m.content LIKE ?"

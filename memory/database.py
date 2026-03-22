@@ -5,7 +5,18 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import Optional
 
-from embedding import EmbeddingModel
+# Try to import EmbeddingModel, fall back to simple version if not available
+try:
+    from embedding import EmbeddingModel
+except ImportError:
+    # Fallback embedding model when torch not available
+    class EmbeddingModel:
+        """Simple embedding model that returns zero vectors."""
+        def __init__(self):
+            self.dimension = 384
+        
+        def get(self, text: str) -> np.ndarray:
+            return np.zeros(self.dimension, dtype=np.float32)
 
 
 DEFAULT_DB_PATH = "memory.db"
@@ -28,7 +39,8 @@ class MemoryDB:
         content: str,
         keywords: list[str] | None = None,
         properties: dict[str, str] | None = None,
-        embedding: np.ndarray | None = None
+        embedding: np.ndarray | None = None,
+        created_at: str | None = None
     ) -> int:
         """Add a memory with optional keywords and properties.
         
@@ -37,6 +49,7 @@ class MemoryDB:
             keywords: Optional keywords to tag the memory
             properties: Optional key-value pairs (e.g., {"role": "user"})
             embedding: Optional pre-computed embedding (generated from content if not provided)
+            created_at: Optional ISO timestamp (e.g., "2025-01-01T10:00:00+00:00")
             
         Returns:
             The ID of the inserted memory
@@ -45,14 +58,15 @@ class MemoryDB:
         if embedding is None:
             embedding = self.embedding.get(content)
         
-        now = datetime.now(timezone.utc).isoformat()
+        # Use provided timestamp or current time
+        created_at = created_at or datetime.now(timezone.utc).isoformat()
         
         with sqlite3.connect(self.db_path) as conn:
             # Insert memory
             cursor = conn.execute(
                 """INSERT INTO memories (content, embedding, created_at, last_updated)
                    VALUES (?, ?, ?, ?)""",
-                (content, embedding.tobytes(), now, now)
+                (content, embedding.tobytes(), created_at, created_at)
             )
             memory_id = cursor.lastrowid
             

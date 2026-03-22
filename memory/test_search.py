@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Comprehensive test suite for memory search functionality."""
+"""Comprehensive test suite for memory search functionality using MemoryDB API."""
 
-import sqlite3
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -10,178 +9,84 @@ TEST_DB = "test_search.db"
 
 
 def setup_database():
-    """Create fresh test database with all required tables."""
+    """Create fresh test database using MemoryDB."""
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
     
-    conn = sqlite3.connect(TEST_DB)
-    
-    # Main memories table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS memories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            embedding BLOB,
-            created_at TEXT NOT NULL,
-            last_updated TEXT NOT NULL,
-            last_accessed TEXT
-        )
-    """)
-    
-    # Keywords table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS keywords (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            embedding BLOB
-        )
-    """)
-    
-    # Memory keywords junction
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS memory_keywords (
-            memory_id INTEGER NOT NULL,
-            keyword_id INTEGER NOT NULL,
-            PRIMARY KEY (memory_id, keyword_id)
-        )
-    """)
-    
-    # Memory properties table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS memory_properties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            memory_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT NOT NULL,
-            UNIQUE(memory_id, key)
-        )
-    """)
-    
-    # Memory links table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS memory_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_id INTEGER NOT NULL,
-            target_id INTEGER NOT NULL,
-            link_type TEXT NOT NULL,
-            UNIQUE(source_id, target_id, link_type)
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+    from database import init_db
+    init_db(TEST_DB)
     print("✓ Database setup complete")
 
 
 def add_test_data():
-    """Add test memories with various keywords and properties."""
-    conn = sqlite3.connect(TEST_DB)
-    now = datetime.now(timezone.utc).isoformat()
+    """Add test memories using MemoryDB API."""
+    from database import MemoryDB
     
-    # Helper to insert keyword (no embedding for now)
-    def insert_keyword(name):
-        conn.execute("INSERT OR IGNORE INTO keywords (name) VALUES (?)", (name,))
-        row = conn.execute("SELECT id FROM keywords WHERE name = ?", (name,)).fetchone()
-        return row[0] if row else None
-    
-    # Helper to insert memory
-    def insert_memory(content, created_offset_hours=0):
-        created = (datetime.now(timezone.utc) - timedelta(hours=created_offset_hours)).isoformat()
-        conn.execute(
-            "INSERT INTO memories (content, created_at, last_updated) VALUES (?, ?, ?)",
-            (content, created, created)
-        )
-        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    
-    # Helper to link keyword to memory
-    def link_keyword(mem_id, kw_name):
-        kw_id = insert_keyword(kw_name)
-        conn.execute(
-            "INSERT OR IGNORE INTO memory_keywords (memory_id, keyword_id) VALUES (?, ?)",
-            (mem_id, kw_id)
-        )
-    
-    # Helper to add property
-    def add_property(mem_id, key, value):
-        conn.execute(
-            "INSERT OR REPLACE INTO memory_properties (memory_id, key, value) VALUES (?, ?, ?)",
-            (mem_id, key, value)
-        )
-    
-    # =========================================================================
-    # Add test memories
-    # =========================================================================
+    db = MemoryDB(TEST_DB)
+    now = datetime.now(timezone.utc)
     
     # Memory 1: Python programming (recent)
-    mem1 = insert_memory("Learning Python programming with numpy and pandas", 0)
-    link_keyword(mem1, "python")
-    link_keyword(mem1, "coding")
-    link_keyword(mem1, "programming")
-    link_keyword(mem1, "numpy")
-    link_keyword(mem1, "pandas")
-    add_property(mem1, "role", "tutorial")
-    add_property(mem1, "importance", "high")
+    mem1 = db.add_memory(
+        "Learning Python programming with numpy and pandas",
+        keywords=["python", "coding", "programming", "numpy", "pandas"],
+        properties={"role": "tutorial", "importance": "high"},
+        created_at=(now - timedelta(hours=0)).isoformat()
+    )
     print(f"  Added memory 1: Python programming (id={mem1})")
     
     # Memory 2: JavaScript (recent)
-    mem2 = insert_memory("Building React web applications with JavaScript", 2)
-    link_keyword(mem2, "javascript")
-    link_keyword(mem2, "react")
-    link_keyword(mem2, "web")
-    link_keyword(mem2, "frontend")
-    add_property(mem2, "role", "user")
-    add_property(mem2, "project", "webapp")
+    mem2 = db.add_memory(
+        "Building React web applications with JavaScript",
+        keywords=["javascript", "react", "web", "frontend"],
+        properties={"role": "user", "project": "webapp"},
+        created_at=(now - timedelta(hours=2)).isoformat()
+    )
     print(f"  Added memory 2: JavaScript (id={mem2})")
     
     # Memory 3: Machine learning (older)
-    mem3 = insert_memory("Deep learning with PyTorch and neural networks", 48)
-    link_keyword(mem3, "machine-learning")
-    link_keyword(mem3, "pytorch")
-    link_keyword(mem3, "deep-learning")
-    link_keyword(mem3, "neural-networks")
-    add_property(mem3, "role", "research")
-    add_property(mem3, "importance", "high")
+    mem3 = db.add_memory(
+        "Deep learning with PyTorch and neural networks",
+        keywords=["machine-learning", "pytorch", "deep-learning", "neural-networks"],
+        properties={"role": "research", "importance": "high"},
+        created_at=(now - timedelta(hours=48)).isoformat()
+    )
     print(f"  Added memory 3: Machine learning (id={mem3})")
     
     # Memory 4: Deprecated old code (old)
-    mem4 = insert_memory("Old deprecated Python 2 code that needs updating", 168)  # 1 week ago
-    link_keyword(mem4, "python")
-    link_keyword(mem4, "deprecated")
-    link_keyword(mem4, "old")
-    link_keyword(mem4, "python2")
-    add_property(mem4, "status", "archived")
+    mem4 = db.add_memory(
+        "Old deprecated Python 2 code that needs updating",
+        keywords=["python", "deprecated", "old", "python2"],
+        properties={"status": "archived"},
+        created_at=(now - timedelta(hours=168)).isoformat()  # 1 week ago
+    )
     print(f"  Added memory 4: Deprecated code (id={mem4})")
     
     # Memory 5: Database (recent)
-    mem5 = insert_memory("PostgreSQL database optimization and indexing", 6)
-    link_keyword(mem5, "postgresql")
-    link_keyword(mem5, "database")
-    link_keyword(mem5, "sql")
-    link_keyword(mem5, "optimization")
-    add_property(mem5, "role", "admin")
+    mem5 = db.add_memory(
+        "PostgreSQL database optimization and indexing",
+        keywords=["postgresql", "database", "sql", "optimization"],
+        properties={"role": "admin"},
+        created_at=(now - timedelta(hours=6)).isoformat()
+    )
     print(f"  Added memory 5: Database (id={mem5})")
     
     # Memory 6: Docker (older)
-    mem6 = insert_memory("Docker containerization and Kubernetes deployment", 72)
-    link_keyword(mem6, "docker")
-    link_keyword(mem6, "kubernetes")
-    link_keyword(mem6, "containers")
-    link_keyword(mem6, "devops")
-    add_property(mem6, "role", "devops")
+    mem6 = db.add_memory(
+        "Docker containerization and Kubernetes deployment",
+        keywords=["docker", "kubernetes", "containers", "devops"],
+        properties={"role": "devops"},
+        created_at=(now - timedelta(hours=72)).isoformat()
+    )
     print(f"  Added memory 6: Docker (id={mem6})")
     
     # Memory 7: API development (recent)
-    mem7 = insert_memory("Building REST APIs with FastAPI in Python", 4)
-    link_keyword(mem7, "python")
-    link_keyword(mem7, "fastapi")
-    link_keyword(mem7, "api")
-    link_keyword(mem7, "rest")
-    add_property(mem7, "role", "developer")
-    add_property(mem7, "project", "backend")
+    mem7 = db.add_memory(
+        "Building REST APIs with FastAPI in Python",
+        keywords=["python", "fastapi", "api", "rest"],
+        properties={"role": "developer", "project": "backend"},
+        created_at=(now - timedelta(hours=4)).isoformat()
+    )
     print(f"  Added memory 7: API development (id={mem7})")
-    
-    conn.commit()
-    conn.close()
     
     # Return memory IDs for cleanup
     return [mem1, mem2, mem3, mem4, mem5, mem6, mem7]
@@ -189,8 +94,9 @@ def add_test_data():
 
 def run_search_tests(memory_ids):
     """Run all search tests and verify results."""
-    from search import MemorySearcher
-    searcher = MemorySearcher(TEST_DB)
+    from database import MemoryDB
+    
+    db = MemoryDB(TEST_DB)
     
     print("\n" + "=" * 60)
     print("RUNNING SEARCH TESTS")
@@ -326,23 +232,6 @@ def run_search_tests(memory_ids):
         },
         
         # =========================================================================
-        # EMBEDDING SIMILARITY TESTS (s: operator) - requires embedding model
-        # These test vector similarity - comment out when no embedding available
-        # =========================================================================
-        # {
-        #     "name": "Embedding similarity - prog",
-        #     "query": "s:prog",
-        #     "expected_count": 3,
-        #     "expected_contains": ["Python programming", "deprecated", "REST APIs"],
-        # },
-        # {
-        #     "name": "Embedding similarity - webdev",
-        #     "query": "s:webdev",
-        #     "expected_count": 1,
-        #     "expected_contains": ["React web"],
-        # },
-        
-        # =========================================================================
         # COMBINED DATE + KEYWORD TESTS
         # =========================================================================
         {
@@ -431,7 +320,7 @@ def run_search_tests(memory_ids):
         query = test["query"]
         expected_count = test["expected_count"]
         
-        results = searcher.search(query)
+        results = db.search(query)
         actual_count = len(results)
         
         # Check content if specified
@@ -478,31 +367,9 @@ def run_search_tests(memory_ids):
 
 
 def cleanup(memory_ids):
-    """Remove test data from database."""
-    conn = sqlite3.connect(TEST_DB)
-    
-    # Delete in reverse dependency order
-    conn.execute("DELETE FROM memory_properties WHERE memory_id IN ({})".format(
-        ",".join("?" * len(memory_ids))), memory_ids)
-    conn.execute("DELETE FROM memory_keywords WHERE memory_id IN ({})".format(
-        ",".join("?" * len(memory_ids))), memory_ids)
-    conn.execute("DELETE FROM memories WHERE id IN ({})".format(
-        ",".join("?" * len(memory_ids))), memory_ids)
-    
-    # Clean up orphaned keywords
-    conn.execute("""
-        DELETE FROM keywords WHERE id NOT IN (
-            SELECT DISTINCT keyword_id FROM memory_keywords
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
-    
-    # Remove database file
+    """Remove test database file."""
     if os.path.exists(TEST_DB):
         os.remove(TEST_DB)
-    
     print("✓ Cleanup complete")
 
 
