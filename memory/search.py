@@ -96,10 +96,11 @@ class SearchNode:
 class SearchParser:
     """Parser for the search query DSL."""
     
-    def __init__(self, query_string: str):
+    def __init__(self, query_string: str, searcher=None):
         self.query_string = query_string.strip()
         self.tokens = []
         self.pos = 0
+        self.searcher = searcher  # MemorySearcher instance for similarity search
     
     # -------------------------------------------------------------------------
     # TOKENIZER
@@ -486,14 +487,36 @@ class SearchParser:
             params = [value.lower()]
         
         elif search_type == SearchType.KEYWORD_SIM:
-            # Keyword similarity - search via LIKE on keyword names
-            sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name LIKE ?)"
-            params = [f"%{value.lower()}%"]
+            # Keyword similarity - use embedding vectors
+            # Get matching keyword IDs using vector similarity
+            if self.searcher and self.searcher.embedding:
+                matching_kw_ids = self.searcher._get_similar_keywords(value)
+                if matching_kw_ids:
+                    placeholders = ",".join("?" * len(matching_kw_ids))
+                    sql = f" EXISTS (SELECT 1 FROM memory_keywords mk WHERE mk.memory_id = m.id AND mk.keyword_id IN ({placeholders}))"
+                    params = matching_kw_ids
+                else:
+                    sql = " 1=0"  # No matches
+            else:
+                # Fallback to LIKE if no embedding model
+                sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name LIKE ?)"
+                params = [f"%{value.lower()}%"]
         
         elif search_type == SearchType.QUERY:
-            # Text query - search in content
-            sql = " m.content LIKE ?"
-            params = [f"%{value}%"]
+            # Text query - vector similarity search on memory content
+            if self.searcher and self.searcher.embedding:
+                # Get memories with similar content embeddings
+                matching_memory_ids = self.searcher._get_similar_memories(value)
+                if matching_memory_ids:
+                    placeholders = ",".join("?" * len(matching_memory_ids))
+                    sql = f" m.id IN ({placeholders})"
+                    params = matching_memory_ids
+                else:
+                    sql = " 1=0"
+            else:
+                # Fallback to LIKE
+                sql = " m.content LIKE ?"
+                params = [f"%{value}%"]
         
         elif search_type == SearchType.DATE:
             # Date filter - uses created_at or last_accessed
@@ -548,9 +571,97 @@ class SearchParser:
 class MemorySearcher:
     """Handles searching memories using the query DSL."""
     
+    SIMILARITY_THRESHOLD = 0.5  # Cosine similarity threshold
+    
     def __init__(self, db_path: str, embedding_model=None):
         self.db_path = db_path
         self.embedding = embedding_model
+    
+    def _get_similar_keywords(self, query: str, limit: int = 100) -> list[int]:
+        """Find keywords with similar embeddings to the query.
+        
+        Args:
+            query: Search query text
+            limit: Max keywords to consider
+            
+        Returns:
+            List of keyword IDs with similarity above threshold
+        """
+        import sqlite3
+        import numpy as np
+        
+        if not self.embedding:
+            return []
+        
+        # Get embedding for query
+        query_embedding = self.embedding.get(query)
+        if query_embedding.size == 0:
+            return []
+        
+        # Get all keywords with embeddings
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT id, embedding FROM keywords WHERE embedding IS NOT NULL LIMIT ?",
+                (limit,)
+            ).fetchall()
+        
+        # Calculate cosine similarity
+        matching_ids = []
+        for row in rows:
+            kw_id, embedding_blob = row
+            if embedding_blob:
+                kw_embedding = np.frombuffer(embedding_blob, dtype=np.float32)
+                
+                # Cosine similarity (already normalized, so just dot product)
+                similarity = np.dot(query_embedding, kw_embedding)
+                
+                if similarity >= self.SIMILARITY_THRESHOLD:
+                    matching_ids.append(kw_id)
+        
+        return matching_ids
+    
+    def _get_similar_memories(self, query: str, limit: int = 100) -> list[int]:
+        """Find memories with similar content embeddings to the query.
+        
+        Args:
+            query: Search query text
+            limit: Max memories to consider
+            
+        Returns:
+            List of memory IDs with similarity above threshold
+        """
+        import sqlite3
+        import numpy as np
+        
+        if not self.embedding:
+            return []
+        
+        # Get embedding for query
+        query_embedding = self.embedding.get(query)
+        if query_embedding.size == 0:
+            return []
+        
+        # Get all memories with embeddings
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT id, embedding FROM memories WHERE embedding IS NOT NULL LIMIT ?",
+                (limit,)
+            ).fetchall()
+        
+        # Calculate cosine similarity
+        matching_ids = []
+        for row in rows:
+            mem_id, embedding_blob = row
+            if embedding_blob:
+                mem_embedding = np.frombuffer(embedding_blob, dtype=np.float32)
+                
+                # Cosine similarity
+                similarity = np.dot(query_embedding, mem_embedding)
+                
+                if similarity >= self.SIMILARITY_THRESHOLD:
+                    matching_ids.append(mem_id)
+        
+        return matching_ids
     
     def search(self, query_string: str, limit: int = 50) -> list[dict]:
         """Search memories using the query DSL.
@@ -564,8 +675,8 @@ class MemorySearcher:
         """
         import sqlite3
         
-        # Parse the query
-        parser = SearchParser(query_string)
+        # Parse the query - pass searcher for similarity searches
+        parser = SearchParser(query_string, searcher=self)
         parser.tokenize()
         ast = parser.parse()
         

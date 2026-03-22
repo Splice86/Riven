@@ -78,7 +78,7 @@ def add_test_data():
     conn = sqlite3.connect(TEST_DB)
     now = datetime.now(timezone.utc).isoformat()
     
-    # Helper to insert keyword and return ID
+    # Helper to insert keyword (no embedding for now)
     def insert_keyword(name):
         conn.execute("INSERT OR IGNORE INTO keywords (name) VALUES (?)", (name,))
         row = conn.execute("SELECT id FROM keywords WHERE name = ?", (name,)).fetchone()
@@ -304,6 +304,123 @@ def run_search_tests(memory_ids):
             "name": "Complex - (python OR javascript) AND role=user",
             "query": "k:python OR k:javascript AND p:role=user",
             "expected_count": 1,  # mem2 (javascript + role=user)
+        },
+        
+        # =========================================================================
+        # TIME BOUNDED TESTS - specific date ranges
+        # =========================================================================
+        {
+            "name": "Time bounded - today",
+            "query": "d:today",
+            "expected_count": 4,  # mem1, mem2, mem5, mem7 (created today)
+        },
+        {
+            "name": "Time bounded - last 3 days",
+            "query": "d:last 3 days",
+            "expected_count": 5,  # mem1(0), mem2(2), mem3(48h=2d), mem5(6), mem7(4) - all under 72h
+        },
+        {
+            "name": "Time bounded - specific date range",
+            "query": "d:last 30 days",
+            "expected_count": 7,  # All memories are within 30 days
+        },
+        
+        # =========================================================================
+        # EMBEDDING SIMILARITY TESTS (s: operator) - requires embedding model
+        # These test vector similarity - comment out when no embedding available
+        # =========================================================================
+        # {
+        #     "name": "Embedding similarity - prog",
+        #     "query": "s:prog",
+        #     "expected_count": 3,
+        #     "expected_contains": ["Python programming", "deprecated", "REST APIs"],
+        # },
+        # {
+        #     "name": "Embedding similarity - webdev",
+        #     "query": "s:webdev",
+        #     "expected_count": 1,
+        #     "expected_contains": ["React web"],
+        # },
+        
+        # =========================================================================
+        # COMBINED DATE + KEYWORD TESTS
+        # =========================================================================
+        {
+            "name": "Combined - python AND last 7 days",
+            "query": "k:python AND d:last 7 days",
+            "expected_count": 2,  # mem1, mem7 (recent python)
+        },
+        {
+            "name": "Combined - docker AND last 3 days",
+            "query": "k:docker AND d:last 3 days",
+            "expected_count": 0,  # mem6 is 72 hours old
+        },
+        
+        # =========================================================================
+        # COMBINED DATE + PROPERTY TESTS
+        # =========================================================================
+        {
+            "name": "Combined - importance=high AND last 7 days",
+            "query": "p:importance=high AND d:last 7 days",
+            "expected_count": 2,  # mem1 and mem3 (both under 7 days)
+        },
+        
+        # =========================================================================
+        # TRIPLE COMBINATION TESTS
+        # =========================================================================
+        {
+            "name": "Triple - python AND coding AND last 7 days",
+            "query": "k:python AND k:coding AND d:last 7 days",
+            "expected_count": 1,
+            "expected_contains": ["Learning Python"],
+        },
+        {
+            "name": "Triple - python OR javascript AND role=user AND NOT deprecated",
+            "query": "(k:python OR k:javascript) AND p:role=user AND NOT k:deprecated",
+            "expected_count": 1,
+            "expected_contains": ["React web"],
+        },
+        
+        # =========================================================================
+        # NEGATION WITH PROPERTY TESTS
+        # =========================================================================
+        {
+            "name": "Negation - NOT role=user",
+            "query": "NOT p:role=user",
+            "expected_count": 6,  # All except mem2
+        },
+        {
+            "name": "Negation - NOT importance=high",
+            "query": "NOT p:importance=high",
+            "expected_count": 5,  # All except mem1, mem3
+        },
+        
+        # =========================================================================
+        # EMPTY RESULT TESTS
+        # =========================================================================
+        {
+            "name": "Empty - non-existent keyword",
+            "query": "k:nonexistent",
+            "expected_count": 0,
+        },
+        {
+            "name": "Empty - old date with recent keyword",
+            "query": "k:python AND d:last 1 days",
+            "expected_count": 2,  # mem1, mem7 within 1 day
+        },
+        
+        # =========================================================================
+        # EDGE CASE TESTS
+        # =========================================================================
+        {
+            "name": "Edge - exact keyword match is case insensitive",
+            "query": "k:PYTHON",  # uppercase
+            "expected_count": 3,
+        },
+        {
+            "name": "Edge - property key case insensitive",
+            "query": "p:ROLE=user",  # uppercase
+            "expected_count": 1,
         },
     ]
     
