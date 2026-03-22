@@ -481,15 +481,14 @@ class SearchParser:
         negated = node.negated
         
         if search_type == SearchType.KEYWORD:
-            # Keyword exact match - search in keywords JSON array
-            sql = " EXISTS (SELECT 1 FROM json_each(m.keywords) WHERE json_each.value = ?)"
-            params = [value]
+            # Keyword exact match - search via memory_keywords junction table
+            sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name = ?)"
+            params = [value.lower()]
         
         elif search_type == SearchType.KEYWORD_SIM:
-            # Keyword similarity - would need embedding comparison
-            # For now, do a LIKE match on keywords
-            sql = " EXISTS (SELECT 1 FROM json_each(m.keywords) WHERE json_each.value LIKE ?)"
-            params = [f"%{value}%"]
+            # Keyword similarity - search via LIKE on keyword names
+            sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name LIKE ?)"
+            params = [f"%{value.lower()}%"]
         
         elif search_type == SearchType.QUERY:
             # Text query - search in content
@@ -497,11 +496,11 @@ class SearchParser:
             params = [f"%{value}%"]
         
         elif search_type == SearchType.DATE:
-            # Date filter
+            # Date filter - uses created_at or last_accessed
             start, end = self.parse_date(value)
             if start and end:
-                sql = " m.created_at BETWEEN ? AND ?"
-                params = [start, end]
+                sql = " (m.created_at BETWEEN ? AND ? OR m.last_accessed BETWEEN ? AND ?)"
+                params = [start, end, start, end]
             else:
                 sql = " 1=1"
                 params = []
@@ -510,8 +509,8 @@ class SearchParser:
             # Property filter - key=value format
             if '=' in value:
                 prop_key, prop_val = value.split('=', 1)
-                sql = " EXISTS (SELECT 1 FROM json_each(m.properties) WHERE json_each.key = ? AND json_each.value = ?)"
-                params = [prop_key, prop_val]
+                sql = " EXISTS (SELECT 1 FROM memory_properties mp WHERE mp.memory_id = m.id AND mp.key = ? AND mp.value = ?)"
+                params = [prop_key.lower(), prop_val]
             else:
                 sql = " 1=1"
                 params = []
@@ -573,9 +572,9 @@ class MemorySearcher:
         # Build SQL
         where_clause, params = parser.build_query(ast)
         
-        # Build full query
+        # Build full query - simpler version without json_objectagg
         sql = f"""
-            SELECT m.id, m.content, m.keywords, m.properties, m.created_at, m.updated_at
+            SELECT m.id, m.content, m.created_at, m.last_updated as updated_at
             FROM memories m
             WHERE {where_clause}
             ORDER BY m.created_at DESC
@@ -591,11 +590,27 @@ class MemorySearcher:
             
             results = []
             for row in rows:
+                # Get keywords for this memory
+                keywords = conn.execute(
+                    """SELECT k.name FROM keywords k 
+                       JOIN memory_keywords mk ON k.id = mk.keyword_id 
+                       WHERE mk.memory_id = ?""",
+                    (row['id'],)
+                ).fetchall()
+                keywords_list = [k['name'] for k in keywords]
+                
+                # Get properties for this memory
+                props = conn.execute(
+                    "SELECT key, value FROM memory_properties WHERE memory_id = ?",
+                    (row['id'],)
+                ).fetchall()
+                properties_dict = {p['key']: p['value'] for p in props}
+                
                 results.append({
                     'id': row['id'],
                     'content': row['content'],
-                    'keywords': row['keywords'],
-                    'properties': row['properties'],
+                    'keywords': keywords_list,
+                    'properties': properties_dict,
                     'created_at': row['created_at'],
                     'updated_at': row['updated_at'],
                 })

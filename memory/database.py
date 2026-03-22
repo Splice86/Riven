@@ -41,33 +41,59 @@ class MemoryDB:
         Returns:
             The ID of the inserted memory
         """
-        import json
-        
         # Generate embedding if not provided
         if embedding is None:
             embedding = self.embedding.get(content)
         
         now = datetime.now(timezone.utc).isoformat()
         
-        # Store keywords as JSON array
-        keywords_json = "[]"
-        if keywords:
-            unique_keywords = list(set(kw.lower().strip() for kw in keywords if kw.strip()))
-            keywords_json = json.dumps(unique_keywords)
-        
-        # Store properties as JSON object
-        properties_json = "{}"
-        if properties:
-            properties_json = json.dumps(properties)
-        
         with sqlite3.connect(self.db_path) as conn:
             # Insert memory
             cursor = conn.execute(
-                """INSERT INTO memories (content, keywords, properties, embedding, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (content, keywords_json, properties_json, embedding.tobytes(), now, now)
+                """INSERT INTO memories (content, embedding, created_at, last_updated)
+                   VALUES (?, ?, ?, ?)""",
+                (content, embedding.tobytes(), now, now)
             )
             memory_id = cursor.lastrowid
+            
+            # Handle keywords (lowercase, deduplicated)
+            if keywords:
+                unique_keywords = set(kw.lower().strip() for kw in keywords if kw.strip())
+                
+                for kw in unique_keywords:
+                    # Get or create keyword
+                    kw_row = conn.execute(
+                        "SELECT id FROM keywords WHERE name = ?", (kw,)
+                    ).fetchone()
+                    
+                    if kw_row is None:
+                        # Insert new keyword
+                        kw_embedding = self.embedding.get(kw)
+                        cursor = conn.execute(
+                            "INSERT INTO keywords (name, embedding) VALUES (?, ?)",
+                            (kw, kw_embedding.tobytes())
+                        )
+                        kw_id = cursor.lastrowid
+                    else:
+                        kw_id = kw_row[0]
+                    
+                    # Link memory to keyword
+                    conn.execute(
+                        "INSERT OR IGNORE INTO memory_keywords (memory_id, keyword_id) VALUES (?, ?)",
+                        (memory_id, kw_id)
+                    )
+            
+            # Handle properties (lowercase key names)
+            if properties:
+                for key, value in properties.items():
+                    key_lower = key.lower().strip()
+                    if key_lower:
+                        conn.execute(
+                            """INSERT OR REPLACE INTO memory_properties (memory_id, key, value)
+                               VALUES (?, ?, ?)""",
+                            (memory_id, key_lower, value)
+                        )
+            
             conn.commit()
             
             return memory_id
@@ -87,104 +113,6 @@ class MemoryDB:
         from search import MemorySearcher
         searcher = MemorySearcher(self.db_path, self.embedding)
         return searcher.search(query_string, limit)
-    
-    def get_memory(self, memory_id: int) -> dict | None:
-        """Get a single memory by ID.
-        
-        Args:
-            memory_id: The memory ID
-            
-        Returns:
-            Memory dict or None if not found
-        """
-        import json
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT * FROM memories WHERE id = ?",
-                (memory_id,)
-            ).fetchone()
-            
-            if row is None:
-                return None
-            
-            return {
-                'id': row['id'],
-                'content': row['content'],
-                'keywords': json.loads(row['keywords']) if row['keywords'] else [],
-                'properties': json.loads(row['properties']) if row['properties'] else {},
-                'embedding': np.frombuffer(row['embedding']) if row['embedding'] else None,
-                'created_at': row['created_at'],
-                'updated_at': row['updated_at'],
-            }
-    
-    def update_memory(
-        self,
-        memory_id: int,
-        content: str | None = None,
-        keywords: list[str] | None = None,
-        properties: dict[str, str] | None = None
-    ) -> bool:
-        """Update an existing memory.
-        
-        Args:
-            memory_id: The memory ID to update
-            content: New content (optional)
-            keywords: New keywords list (optional)
-            properties: New properties dict (optional)
-            
-        Returns:
-            True if updated, False if not found
-        """
-        import json
-        
-        now = datetime.now(timezone.utc).isoformat()
-        
-        # Build update query dynamically
-        updates = ["updated_at = ?"]
-        params = [now]
-        
-        if content is not None:
-            updates.append("content = ?")
-            params.append(content)
-        
-        if keywords is not None:
-            unique_keywords = list(set(kw.lower().strip() for kw in keywords if kw.strip()))
-            updates.append("keywords = ?")
-            params.append(json.dumps(unique_keywords))
-        
-        if properties is not None:
-            updates.append("properties = ?")
-            params.append(json.dumps(properties))
-        
-        params.append(memory_id)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                f"UPDATE memories SET {', '.join(updates)} WHERE id = ?",
-                params
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-    
-    def delete_memory(self, memory_id: int) -> bool:
-        """Delete a memory by ID.
-        
-        Args:
-            memory_id: The memory ID to delete
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM memories WHERE id = ?",
-                (memory_id,)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-
 
 
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
@@ -194,21 +122,66 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         db_path: Path to the SQLite database file
     """
     with sqlite3.connect(db_path) as conn:
-        # Main memories table - simplified with JSON columns for search
+        # Main memories table - simplified
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
-                keywords TEXT,  -- JSON array of keywords ["python", "coding"]
-                properties TEXT, -- JSON object {"role": "user"}
                 embedding BLOB,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                last_updated TEXT NOT NULL,
+                last_accessed TEXT
             )
         """)
         
-        # Indexes for search
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at)")
+        # Keywords table (with embeddings for similarity search)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                embedding BLOB
+            )
+        """)
+        
+        # Memory keywords junction
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_keywords (
+                memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                PRIMARY KEY (memory_id, keyword_id)
+            )
+        """)
+        
+        # Memory properties (key-value store)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_properties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                UNIQUE(memory_id, key)
+            )
+        """)
+        
+        # Memory links (directional relationships)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+                link_type TEXT NOT NULL,
+                UNIQUE(source_id, target_id, link_type)
+            )
+        """)
+        
+        # Indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mk_memory ON memory_keywords(memory_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mk_keyword ON memory_keywords(keyword_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_keyword_name ON keywords(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mp_memory_key ON memory_properties(memory_id, key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_source ON memory_links(source_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_target ON memory_links(target_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_type ON memory_links(link_type)")
         
         conn.commit()
 
