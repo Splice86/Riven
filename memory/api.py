@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import MemoryDB, init_db
+import numpy as np
 
 app = FastAPI(title="Riven Memory API")
 
@@ -41,6 +42,12 @@ class SearchRequest(BaseModel):
     """Request to search memories."""
     query: str
     limit: int = 50
+
+
+
+class EmbedRequest(BaseModel):
+    """Request to get embedding for text."""
+    text: str
 
 
 @app.on_event("startup")
@@ -215,6 +222,28 @@ async def delete_memory(memory_id: int) -> dict:
         raise HTTPException(status_code=404, detail="Memory not found")
     
     return {"deleted": memory_id, "message": "Memory deleted successfully"}
+
+
+@app.post("/embed")
+async def get_embedding(request: EmbedRequest) -> dict:
+    """Get embedding vector for text.
+    
+    Args:
+        request: Text to embed
+        
+    Returns:
+        Embedding vector as list of floats
+    """
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    embedding = db.embedding.get(request.text)
+    
+    return {
+        "text": request.text,
+        "embedding": embedding.tolist(),
+        "dimension": len(embedding)
+    }
 
 
 @app.get("/stats")
