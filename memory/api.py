@@ -190,8 +190,8 @@ async def get_memory(memory_id: int) -> dict:
     if not db:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
-    results = db.search(f"id:{memory_id}", limit=1)
-    if not results:
+    memory = db.get_memory(memory_id)
+    if not memory:
         raise HTTPException(status_code=404, detail="Memory not found")
     
     return results[0]
@@ -210,9 +210,11 @@ async def delete_memory(memory_id: int) -> dict:
     if not db:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
-    # Note: The database module doesn't have a delete method currently
-    # This would need to be added if deletion is required
-    raise HTTPException(status_code=501, detail="Delete not implemented")
+    deleted = db.delete_memory(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    
+    return {"deleted": memory_id, "message": "Memory deleted successfully"}
 
 
 @app.get("/stats")

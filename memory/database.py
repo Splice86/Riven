@@ -147,6 +147,82 @@ class MemoryDB:
         searcher = MemorySearcher(self.db_path, self.embedding)
         return searcher.search(query_string, limit)
 
+    def get_memory(self, memory_id: int) -> dict | None:
+        """Get a memory by ID.
+        
+        Args:
+            memory_id: The ID of the memory
+            
+        Returns:
+            Memory dict or None if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            # Get memory
+            row = conn.execute(
+                "SELECT id, content, created_at, last_updated FROM memories WHERE id = ?",
+                (memory_id,)
+            ).fetchone()
+            
+            if not row:
+                return None
+            
+            # Get keywords
+            keywords = [
+                r[0] for r in conn.execute(
+                    """SELECT k.name FROM keywords k
+                       JOIN memory_keywords mk ON k.id = mk.keyword_id
+                       WHERE mk.memory_id = ?""",
+                    (memory_id,)
+                ).fetchall()
+            ]
+            
+            # Get properties
+            properties = {
+                r[0]: r[1] for r in conn.execute(
+                    "SELECT key, value FROM memory_properties WHERE memory_id = ?",
+                    (memory_id,)
+                ).fetchall()
+            }
+            
+            return {
+                "id": row["id"],
+                "content": row["content"],
+                "keywords": keywords,
+                "properties": properties,
+                "created_at": row["created_at"],
+                "updated_at": row["last_updated"]
+            }
+
+    def delete_memory(self, memory_id: int) -> bool:
+        """Delete a memory by ID.
+        
+        Args:
+            memory_id: The ID of the memory to delete
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            # Check if memory exists
+            exists = conn.execute(
+                "SELECT 1 FROM memories WHERE id = ?",
+                (memory_id,)
+            ).fetchone()
+            
+            if not exists:
+                return False
+            
+            # Delete in correct order (foreign keys)
+            conn.execute("DELETE FROM memory_keywords WHERE memory_id = ?", (memory_id,))
+            conn.execute("DELETE FROM memory_properties WHERE memory_id = ?", (memory_id,))
+            conn.execute("DELETE FROM memory_links WHERE source_id = ? OR target_id = ?", (memory_id, memory_id))
+            conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            conn.commit()
+            
+            return True
+
 
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     """Initialize the database schema.
