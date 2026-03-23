@@ -525,6 +525,19 @@ def test_vector_similarity(db):
         print(f"  ✗ k:python AND q:async -> {len(results)} (expected >=1)")
         failed += 1
     
+    # Test 7: Strict vs Permissive comparison
+    # Permissive (lower threshold) should return >= strict (higher threshold)
+    results_strict = db.search("q:async@0.7")
+    results_permissive = db.search("q:async@0.3")
+    strict_count = len(results_strict)
+    permissive_count = len(results_permissive)
+    if permissive_count >= strict_count:
+        print(f"  OK Permissive {permissive_count} >= Strict {strict_count}")
+        passed += 1
+    else:
+        print(f"  FAIL Permissive {permissive_count} < Strict {strict_count}")
+        failed += 1
+    
     return passed, failed
 
 
