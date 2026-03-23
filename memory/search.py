@@ -848,18 +848,20 @@ class SearchParser:
                         target = potential_target
             
             # Determine which direction to check
+            # l:source:ID means "find memories that ID links TO" (targets)
+            # l:target:ID means "find memories that link TO ID" (sources)
             if direction == 'source':
-                # Memories that are the source (they link TO others)
-                direction_check = "ml.source_id = m.id"
-                target_join = "ml.target_id = m_inner.id"
-            elif direction == 'target':
-                # Memories that are the target (someone links TO them)
+                # Find memories that the specified ID links TO (targets of links where source_id = ID)
                 direction_check = "ml.target_id = m.id"
-                target_join = "ml.source_id = m_inner.id"
+                source_id_param = "ml.source_id"
+            elif direction == 'target':
+                # Find memories that link TO the specified ID (sources of links where target_id = ID)
+                direction_check = "ml.source_id = m.id"
+                source_id_param = "ml.target_id"
             else:
-                # Both directions (default)
+                # Both directions (default) - find memories that have any link
                 direction_check = "(ml.source_id = m.id OR ml.target_id = m.id)"
-                target_join = "ml.target_id = m_inner.id"
+                source_id_param = None
             
             # Handle target (sub-query or direct ID)
             if target and target.startswith('(') and target.endswith(')'):
@@ -873,6 +875,12 @@ class SearchParser:
                 # Fix the inner query to use m_inner for the target memory
                 inner_sql_fixed = inner_sql.replace('m.id', 'm_inner.id')
                 
+                # For source direction, we join on target; for target, we join on source
+                if direction == 'source':
+                    target_join = "ml.target_id = m_inner.id"
+                else:
+                    target_join = "ml.source_id = m_inner.id"
+                
                 sql = f"""EXISTS (
                     SELECT 1 FROM memory_links ml
                     JOIN memories m_inner ON {target_join}
@@ -885,22 +893,22 @@ class SearchParser:
                 # Direct target ID - could have link_type or not
                 try:
                     target_id = int(target)
-                    # Build the query based on whether we have a link_type
+                    # Build the query based on direction and link_type
                     if link_type:
-                        # Both link_type and target specified
+                        # Both link_type and target ID specified
                         sql = f"""EXISTS (
                             SELECT 1 FROM memory_links ml
                             WHERE {direction_check}
                             AND ml.link_type = ?
-                            AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
+                            AND ml.{source_id_param} = ?
                         )"""
                         params = [link_type, target_id]
                     else:
-                        # Only target ID, no link_type - find any link to/from that ID
+                        # Only target ID, no link_type - find any link in that direction
                         sql = f"""EXISTS (
                             SELECT 1 FROM memory_links ml
                             WHERE {direction_check}
-                            AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
+                            AND ml.{source_id_param} = ?
                         )"""
                         params = [target_id]
                 except ValueError:
