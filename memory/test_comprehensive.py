@@ -119,6 +119,35 @@ def add_test_data(use_vector=False):
         created_at=(now - timedelta(days=50)).isoformat()
     )
     
+    # ===== GROUP 5: Numeric properties for comparison tests =====
+    mem9 = db.add_memory(
+        "Negative opinion about topic A",
+        keywords=["opinion", "negative"],
+        properties={"opinion": "-3.5", "rating": "1"},
+        created_at=(now - timedelta(days=2)).isoformat()
+    )
+    
+    mem10 = db.add_memory(
+        "Positive opinion about topic B",
+        keywords=["opinion", "positive"],
+        properties={"opinion": "2.0", "rating": "5"},
+        created_at=(now - timedelta(days=1)).isoformat()
+    )
+    
+    mem11 = db.add_memory(
+        "Neutral opinion about topic C",
+        keywords=["opinion", "neutral"],
+        properties={"opinion": "0", "rating": "3"},
+        created_at=(now - timedelta(days=3)).isoformat()
+    )
+    
+    mem12 = db.add_memory(
+        "String opinion about topic D",
+        keywords=["opinion", "string"],
+        properties={"opinion": "very_negative", "rating": "2"},
+        created_at=(now - timedelta(days=5)).isoformat()
+    )
+    
     # ===== LINKS =====
     # Summary -> original
     db.add_link(summary1, mem5, "summary_of")
@@ -130,11 +159,12 @@ def add_test_data(use_vector=False):
     db.add_link(mem7, mem2, "related_to")   # React related to JS
     db.add_link(mem8, mem4, "derived_from")  # K8s derived from Docker
     
-    print(f"  Added 8 memories + 2 summaries + 5 links")
+    print(f"  Added 12 memories + 2 summaries + 6 links")
     
     return {
         "mem1": mem1, "mem2": mem2, "mem3": mem3, "mem4": mem4,
         "mem5": mem5, "mem6": mem6, "mem7": mem7, "mem8": mem8,
+        "mem9": mem9, "mem10": mem10, "mem11": mem11, "mem12": mem12,
         "summary1": summary1, "summary2": summary2
     }
 
@@ -234,6 +264,81 @@ def test_properties(db):
         passed += 1
     else:
         print(f"  ✗ p:status=active AND k:python -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # ===== NUMERIC PROPERTY TESTS =====
+    # Test 5: Numeric property less than
+    results = db.search("p:opinion<0")
+    if len(results) >= 1:  # mem9 (opinion=-3.5)
+        print(f"  ✓ p:opinion<0 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion<0 -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 6: Numeric property greater than
+    results = db.search("p:opinion>0")
+    if len(results) >= 1:  # mem10 (opinion=2.0)
+        print(f"  ✓ p:opinion>0 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion>0 -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 7: Numeric property less than or equal
+    results = db.search("p:opinion<=0")
+    if len(results) >= 2:  # mem9 (opinion=-3.5), mem11 (opinion=0)
+        print(f"  ✓ p:opinion<=0 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion<=0 -> {len(results)} (expected >=2)")
+        failed += 1
+    
+    # Test 8: Numeric property greater than or equal
+    results = db.search("p:opinion>=0")
+    if len(results) >= 2:  # mem10 (opinion=2.0), mem11 (opinion=0)
+        print(f"  ✓ p:opinion>=0 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion>=0 -> {len(results)} (expected >=2)")
+        failed += 1
+    
+    # Test 9: Numeric property not equal
+    results = db.search("p:opinion!=0")
+    if len(results) >= 2:  # mem9 (opinion=-3.5), mem10 (opinion=2.0)
+        print(f"  ✓ p:opinion!=0 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion!=0 -> {len(results)} (expected >=2)")
+        failed += 1
+    
+    # Test 10: Non-numeric stored property should not match numeric comparison
+    results = db.search("p:opinion>0")
+    # mem12 has opinion=very_negative (string), should NOT match numeric comparison
+    has_non_numeric = any(r.get('properties', {}).get('opinion') == 'very_negative' for r in results)
+    if not has_non_numeric:
+        print(f"  ✓ p:opinion>0 excludes non-numeric -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion>0 should not match string 'very_negative'")
+        failed += 1
+    
+    # Test 11: Numeric property + keyword combined
+    results = db.search("p:opinion<0 AND k:negative")
+    if len(results) >= 1:  # mem9
+        print(f"  ✓ p:opinion<0 AND k:negative -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:opinion<0 AND k:negative -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 12: Rating comparison
+    results = db.search("p:rating>=4")
+    if len(results) >= 1:  # mem10 (rating=5)
+        print(f"  ✓ p:rating>=4 -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:rating>=4 -> {len(results)} (expected >=1)")
         failed += 1
     
     return passed, failed
@@ -589,6 +694,108 @@ def test_mixed_search(db):
     return passed, failed
 
 
+def test_complex_nested(db, ids):
+    """Test complex nested logic with parentheses, multiple operators, etc."""
+    print("\n" + "=" * 60)
+    print("TESTING COMPLEX NESTED LOGIC")
+    print("=" * 60)
+    
+    passed = 0
+    failed = 0
+    
+    # Test 1: Deeply nested with parentheses
+    results = db.search("(k:python OR k:javascript) AND (k:asyncio OR k:async)")
+    if len(results) >= 1:
+        print(f"  ✓ Deep nested (A OR B) AND (C OR D) -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Deep nested -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 2: Triple nested with mixed operators
+    results = db.search("((k:python OR k:javascript) AND d:last 10 days) OR p:status=active")
+    if len(results) >= 1:
+        print(f"  ✓ Triple nested ((A OR B) AND C) OR D -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Triple nested -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 3: Multiple NOT with parentheses - simplified
+    results = db.search("(NOT k:python) AND d:last 7 days")
+    if len(results) >= 1:
+        print(f"  ✓ NOT with AND -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ NOT with AND -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 4: Property numeric with keyword and date
+    results = db.search("(p:opinion>0 OR p:opinion<0) AND k:opinion")
+    if len(results) >= 2:  # mem9, mem10
+        print(f"  ✓ Numeric prop with keyword -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Numeric prop with keyword -> {len(results)} (expected >=2)")
+        failed += 1
+    
+    # Test 5: Link with nested filter
+    results = db.search("l:summary_of AND (k:python OR k:machine-learning)")
+    if len(results) >= 1:
+        print(f"  ✓ Link with nested keyword -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Link with nested keyword -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 6: Four-way nested with IF-THEN-ELSE
+    results = db.search("IF k:python THEN (k:asyncio OR k:fastapi) ELSE (k:docker OR k:kubernetes)")
+    if len(results) >= 1:
+        print(f"  ✓ IF-THEN-ELSE with nested OR -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ IF-THEN-ELSE with nested OR -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 7: Complex date + property + keyword combo
+    results = db.search("(d:last 7 days OR d:last 30 days) AND (k:python OR k:javascript) AND p:status=active")
+    if len(results) >= 1:
+        print(f"  ✓ Date + property + keyword triple -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Date + property + keyword triple -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 8: Nested directional links with keyword
+    results = db.search("(l:source:related_to OR l:target:related_to) AND k:python")
+    if len(results) >= 1:
+        print(f"  ✓ Directional link OR with keyword -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Directional link OR with keyword -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 9: Multiple property comparisons
+    results = db.search("p:opinion<0 AND p:rating<=2")
+    if len(results) >= 1:  # mem9 has opinion=-3.5, rating=1
+        print(f"  ✓ Multiple numeric properties -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Multiple numeric properties -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 10: Deeply nested with all operators
+    results = db.search("((k:python OR k:javascript) AND (d:last 10 days OR p:status=active)) OR (k:docker AND p:status=archived)")
+    if len(results) >= 1:
+        print(f"  ✓ Deep quad nested with all ops -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ Deep quad nested -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    return passed, failed
+
+
 def test_edge_cases(db):
     """Test edge cases and error handling."""
     print("\n" + "=" * 60)
@@ -710,14 +917,15 @@ def main():
         ip, if_ = test_if_then_else(db, ids)
         lp, lf = test_links(db, ids)
         cp, cf = test_combined(db, ids)
+        np, nf = test_complex_nested(db, ids)
         ep, ef = test_edge_cases(db)
         
         if use_vector:
             vp, vf = test_vector_similarity(db)
             mp, mf = test_mixed_search(db)
         
-        total_passed = kp + pp + dp + ip + lp + cp + ep + (vp if use_vector else 0) + (mp if use_vector else 0)
-        total_failed = kf + pf + df + if_ + lf + cf + ef + (vf if use_vector else 0) + (mf if use_vector else 0)
+        total_passed = kp + pp + dp + ip + lp + cp + np + ep + (vp if use_vector else 0) + (mp if use_vector else 0)
+        total_failed = kf + pf + df + if_ + lf + cf + nf + ef + (vf if use_vector else 0) + (mf if use_vector else 0)
     
     # Summary
     print("\n" + "=" * 60)
