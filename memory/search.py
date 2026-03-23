@@ -546,9 +546,11 @@ class SearchParser:
                     unit = parts[2]  # "days" or "hours"
                     
                     if 'day' in unit:
-                        start = now - timedelta(days=num)
+                        # Subtract 1 minute to handle timing edge cases
+                        start = now - timedelta(days=num, minutes=1)
                     elif 'hour' in unit:
-                        start = now - timedelta(hours=num)
+                        # Subtract 1 minute to handle timing edge cases
+                        start = now - timedelta(hours=num, minutes=1)
                     else:
                         return (None, None)
                     
@@ -744,6 +746,8 @@ class SearchParser:
             # Date filter - uses created_at or last_accessed
             start, end = self.parse_date(value)
             if start and end:
+                # Use original BETWEEN - the timing edge case will be handled
+                # by using a slightly earlier start time in parse_date
                 sql = " (m.created_at BETWEEN ? AND ? OR m.last_accessed BETWEEN ? AND ?)"
                 params = [start, end, start, end]
             else:
@@ -761,47 +765,103 @@ class SearchParser:
                 params = []
         
         elif search_type == SearchType.LINK:
-            # Link traversal - format: link_type:target_id or link_type:(query)
-            # Examples: l:summary_of:123, l:related_to:(k:python)
-            if ':' in value:
-                link_type, target = value.split(':', 1)
+            # Link traversal - format: [direction:]link_type[:target_id or :(query)]
+            # Examples: 
+            #   l:related_to - both directions (default)
+            #   l:source:related_to - memories that link TO others
+            #   l:target:related_to - memories that ARE linked TO
+            #   l:related_to:123 - specific target ID
+            #   l:related_to:(k:python) - link to memory matching query
+            
+            # Parse the value to extract direction and link_type
+            direction = None
+            link_type = value
+            target = None
+            
+            # Check for direction prefix: l:source:related_to or l:target:related_to
+            if value.startswith('source:') or value.startswith('target:'):
+                parts = value.split(':', 2)
+                if len(parts) >= 2:
+                    direction = parts[0]
+                    link_type = parts[1]
+                    target = parts[2] if len(parts) > 2 else None
+            elif ':' in value:
+                # Could be link_type:target or link_type:(query)
+                potential_type, potential_target = value.split(':', 1)
+                # If target looks like a number or starts with paren, it's target
+                if potential_target.startswith('(') or potential_target.lstrip('-').isdigit():
+                    link_type = potential_type
+                    target = potential_target
+                else:
+                    # Could be direction:link_type - check if it's a known direction
+                    if potential_type in ('source', 'target'):
+                        direction = potential_type
+                        link_type = potential_target
+                    else:
+                        link_type = potential_type
+                        target = potential_target
+            
+            # Determine which direction to check
+            if direction == 'source':
+                # Memories that are the source (they link TO others)
+                direction_check = "ml.source_id = m.id"
+                target_join = "ml.target_id = m_inner.id"
+            elif direction == 'target':
+                # Memories that are the target (someone links TO them)
+                direction_check = "ml.target_id = m.id"
+                target_join = "ml.source_id = m_inner.id"
+            else:
+                # Both directions (default)
+                direction_check = "(ml.source_id = m.id OR ml.target_id = m.id)"
+                target_join = "ml.target_id = m_inner.id"
+            
+            # Handle target (sub-query or direct ID)
+            if target and target.startswith('(') and target.endswith(')'):
+                # Sub-query: find memories matching the query, then find links to those
+                inner_query = target[1:-1]  # Remove parens
+                inner_parser = SearchParser(inner_query, searcher=self.searcher)
+                inner_parser.tokenize()
+                inner_ast = inner_parser.parse()
+                inner_sql, inner_params = inner_parser.build_query(inner_ast)
                 
-                # Check if target is a sub-query in parentheses
-                if target.startswith('(') and target.endswith(')'):
-                    # Sub-query: find memories matching the query, then find links to those
-                    inner_query = target[1:-1]  # Remove parens
-                    # Execute inner query to get memory IDs
-                    inner_parser = SearchParser(inner_query, searcher=self.searcher)
-                    inner_parser.tokenize()
-                    inner_ast = inner_parser.parse()
-                    inner_sql, inner_params = inner_parser.build_query(inner_ast)
-                    
-                    # Find memories that link to any of the inner results
-                    # This is complex - we'd need to first get IDs, then query links
-                    # For now, let's do a simpler approach: just match all and let caller handle
-                    # Actually, let's do it in two steps in the searcher
+                # Fix the inner query to use m_inner for the target memory
+                inner_sql_fixed = inner_sql.replace('m.id', 'm_inner.id')
+                
+                sql = f"""EXISTS (
+                    SELECT 1 FROM memory_links ml
+                    JOIN memories m_inner ON {target_join}
+                    WHERE {direction_check}
+                    AND ml.link_type = ?
+                    AND ({inner_sql_fixed})
+                )"""
+                params = [link_type] + inner_params
+            elif target:
+                # Direct target ID
+                try:
+                    target_id = int(target)
                     sql = f"""EXISTS (
                         SELECT 1 FROM memory_links ml
-                        JOIN memories m_inner ON ml.target_id = m_inner.id
-                        WHERE ml.source_id = m.id
+                        WHERE {direction_check}
                         AND ml.link_type = ?
-                        AND ({inner_sql})
+                        AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
                     )"""
-                    params = [link_type] + inner_params
-                else:
-                    # Direct target ID
-                    try:
-                        target_id = int(target)
-                        sql = " EXISTS (SELECT 1 FROM memory_links ml WHERE ml.source_id = m.id AND ml.target_id = ? AND ml.link_type = ?)"
-                        params = [target_id, link_type]
-                    except ValueError:
-                        # Invalid target, just check link_type
-                        sql = " EXISTS (SELECT 1 FROM memory_links ml WHERE ml.source_id = m.id AND ml.link_type = ?)"
-                        params = [link_type]
+                    params = [link_type, target_id]
+                except ValueError:
+                    # Invalid target, just check link_type
+                    sql = f"""EXISTS (
+                        SELECT 1 FROM memory_links ml
+                        WHERE {direction_check}
+                        AND ml.link_type = ?
+                    )"""
+                    params = [link_type]
             else:
                 # Just link_type, no target - match any with this link_type
-                sql = " EXISTS (SELECT 1 FROM memory_links ml WHERE ml.source_id = m.id AND ml.link_type = ?)"
-                params = [value]
+                sql = f"""EXISTS (
+                    SELECT 1 FROM memory_links ml
+                    WHERE {direction_check}
+                    AND ml.link_type = ?
+                )"""
+                params = [link_type]
         else:
             sql = " 1=1"
             params = []

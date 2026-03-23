@@ -112,6 +112,25 @@ class MemoryDB:
             
             return memory_id
 
+    def add_link(self, source_id: int, target_id: int, link_type: str) -> None:
+        """Add a link between two memories.
+        
+        The search system handles bidirectional traversal automatically,
+        so only one link is stored.
+        
+        Args:
+            source_id: ID of the source memory (the one doing the linking)
+            target_id: ID of the target memory (the one being linked to)
+            link_type: Type of link (e.g., "related_to", "summary_of", "child")
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO memory_links (source_id, target_id, link_type)
+                   VALUES (?, ?, ?)""",
+                (source_id, target_id, link_type)
+            )
+            conn.commit()
+
     def search(self, query_string: str, limit: int = 50) -> list[dict]:
         """Search memories using the query DSL.
         
