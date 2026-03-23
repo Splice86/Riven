@@ -813,13 +813,24 @@ class SearchParser:
             link_type = value
             target = None
             
-            # Check for direction prefix: l:source:related_to or l:target:related_to
+            # Check for direction prefix: l:source:related_to, l:source:123, or l:target:123
             if value.startswith('source:') or value.startswith('target:'):
                 parts = value.split(':', 2)
                 if len(parts) >= 2:
                     direction = parts[0]
-                    link_type = parts[1]
-                    target = parts[2] if len(parts) > 2 else None
+                    # If second part is numeric, it's the target ID, not link_type
+                    if len(parts) > 2 and parts[2].lstrip('-').isdigit():
+                        # l:source:link_type:123 format
+                        link_type = parts[1]
+                        target = parts[2]
+                    elif parts[1].lstrip('-').isdigit():
+                        # l:source:123 format - numeric is the target ID
+                        link_type = None
+                        target = parts[1]
+                    else:
+                        # l:source:related_to format - second part is link_type
+                        link_type = parts[1]
+                        target = parts[2] if len(parts) > 2 else None
             elif ':' in value:
                 # Could be link_type:target or link_type:(query)
                 potential_type, potential_target = value.split(':', 1)
@@ -871,25 +882,40 @@ class SearchParser:
                 )"""
                 params = [link_type] + inner_params
             elif target:
-                # Direct target ID
+                # Direct target ID - could have link_type or not
                 try:
                     target_id = int(target)
-                    sql = f"""EXISTS (
-                        SELECT 1 FROM memory_links ml
-                        WHERE {direction_check}
-                        AND ml.link_type = ?
-                        AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
-                    )"""
-                    params = [link_type, target_id]
+                    # Build the query based on whether we have a link_type
+                    if link_type:
+                        # Both link_type and target specified
+                        sql = f"""EXISTS (
+                            SELECT 1 FROM memory_links ml
+                            WHERE {direction_check}
+                            AND ml.link_type = ?
+                            AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
+                        )"""
+                        params = [link_type, target_id]
+                    else:
+                        # Only target ID, no link_type - find any link to/from that ID
+                        sql = f"""EXISTS (
+                            SELECT 1 FROM memory_links ml
+                            WHERE {direction_check}
+                            AND ml.{'target_id' if direction != 'target' else 'source_id'} = ?
+                        )"""
+                        params = [target_id]
                 except ValueError:
                     # Invalid target, just check link_type
-                    sql = f"""EXISTS (
-                        SELECT 1 FROM memory_links ml
-                        WHERE {direction_check}
-                        AND ml.link_type = ?
-                    )"""
-                    params = [link_type]
-            else:
+                    if link_type:
+                        sql = f"""EXISTS (
+                            SELECT 1 FROM memory_links ml
+                            WHERE {direction_check}
+                            AND ml.link_type = ?
+                        )"""
+                        params = [link_type]
+                    else:
+                        sql = " 1=1"
+                        params = []
+            elif link_type:
                 # Just link_type, no target - match any with this link_type
                 sql = f"""EXISTS (
                     SELECT 1 FROM memory_links ml
@@ -897,6 +923,13 @@ class SearchParser:
                     AND ml.link_type = ?
                 )"""
                 params = [link_type]
+            else:
+                # No link_type and no target - match any link in direction
+                sql = f"""EXISTS (
+                    SELECT 1 FROM memory_links ml
+                    WHERE {direction_check}
+                )"""
+                params = []
         else:
             sql = " 1=1"
             params = []
