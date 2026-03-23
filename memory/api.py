@@ -1,10 +1,10 @@
-"""Memory API server - FastAPI endpoints for memory storage."""
+"""Memory API server - FastAPI endpoints for memory storage and search."""
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from db import MemoryDB
+from database import MemoryDB, init_db
 
 app = FastAPI(title="Riven Memory API")
 
@@ -12,34 +12,44 @@ app = FastAPI(title="Riven Memory API")
 db: MemoryDB | None = None
 
 
-class MemoryRequest(BaseModel):
-    """Request to add a memory."""
+class AddMemoryRequest(BaseModel):
+    """Request to add a memory with tags/properties."""
     content: str
-    role: str = "user"
     keywords: list[str] | None = None
+    properties: dict[str, str] | None = None
+    created_at: str | None = None  # Optional timestamp (ISO format)
+
+
+class AddSummaryRequest(BaseModel):
+    """Request to add a summary memory with links to target memories."""
+    content: str
+    keywords: list[str] | None = None
+    properties: dict[str, str] | None = None
+    created_at: str  # Required timestamp (ISO format) - set by agent
+    target_ids: list[int]  # List of memory IDs to link to
+    link_type: str = "summary_of"
 
 
 class SearchRequest(BaseModel):
     """Request to search memories."""
     query: str
-    limit: int = 5
-    start_date: str | None = None
-    end_date: str | None = None
+    limit: int = 50
 
 
 @app.on_event("startup")
 async def startup():
     """Initialize the database on startup."""
     global db
+    init_db()
     db = MemoryDB()
 
 
 @app.post("/memories")
-async def add_memory(request: MemoryRequest) -> dict:
-    """Add a new memory.
+async def add_memory(request: AddMemoryRequest) -> dict:
+    """Add a new memory with optional keywords and properties.
     
     Args:
-        request: Memory content, role, and optional keywords
+        request: Memory content, optional keywords, properties, and created_at timestamp
         
     Returns:
         The ID of the created memory
@@ -47,13 +57,67 @@ async def add_memory(request: MemoryRequest) -> dict:
     if not db:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
-    memory_id = db.add(
+    memory_id = db.add_memory(
         content=request.content,
-        role=request.role,
-        keywords=request.keywords
+        keywords=request.keywords,
+        properties=request.properties,
+        created_at=request.created_at
     )
     
     return {"id": memory_id, "content": request.content[:100]}
+
+
+@app.post("/memories/summary")
+async def add_summary(request: AddSummaryRequest) -> dict:
+    """Add a summary memory and link it to target memories.
+    
+    The created_at timestamp is required and should be set by the agent
+    making the API call to time-bound the summary.
+    
+    Args:
+        request: Summary content, keywords, properties, created_at, target_ids, link_type
+        
+    Returns:
+        The ID of the created summary memory
+    """
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    # Add the summary memory
+    summary_id = db.add_memory(
+        content=request.content,
+        keywords=request.keywords,
+        properties=request.properties,
+        created_at=request.created_at
+    )
+    
+    # Link to each target memory
+    for target_id in request.target_ids:
+        db.add_link(
+            source_id=summary_id,
+            target_id=target_id,
+            link_type=request.link_type
+        )
+    
+    return {"id": summary_id, "content": request.content[:100], "linked_to": request.target_ids}
+
+
+@app.post("/memories/search")
+async def search_memories(request: SearchRequest) -> dict:
+    """Search memories using the query DSL.
+    
+    Args:
+        request: Query string and limit
+        
+    Returns:
+        List of matching memories
+    """
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    results = db.search(request.query, limit=request.limit)
+    
+    return {"memories": results, "count": len(results)}
 
 
 @app.get("/memories/{memory_id}")
@@ -69,149 +133,12 @@ async def get_memory(memory_id: int) -> dict:
     if not db:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
-    memory = db.get(memory_id)
-    if not memory:
+    # Search returns a list, we need to find the specific one
+    results = db.search(f"id:{memory_id}", limit=1)
+    if not results:
         raise HTTPException(status_code=404, detail="Memory not found")
     
-    return memory
-
-
-@app.get("/memories")
-async def get_memories(
-    limit: int = 50,
-    start_date: str | None = None,
-    end_date: str | None = None
-) -> dict:
-    """Get recent memories with optional date filtering.
-    
-    Args:
-        limit: Maximum number of memories to return
-        start_date: Filter memories created on or after this date (ISO format)
-        end_date: Filter memories created on or before this date (ISO format)
-        
-    Returns:
-        List of recent memories
-    """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
-    return {"memories": db.search_dated(limit=limit, start_date=start_date, end_date=end_date)}
-
-
-@app.get("/memories/search/keyword/{keyword}")
-async def search_by_keyword(
-    keyword: str,
-    limit: int = 10,
-    start_date: str | None = None,
-    end_date: str | None = None
-) -> dict:
-    """Search memories by keyword with optional date filtering.
-    
-    Args:
-        keyword: Keyword to search for
-        limit: Maximum number of results
-        start_date: Filter memories created on or after this date (ISO format)
-        end_date: Filter memories created on or before this date (ISO format)
-        
-    Returns:
-        List of matching memories
-    """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
-    return {"memories": db.search_dated(keywords=keyword, limit=limit, start_date=start_date, end_date=end_date)}
-
-
-@app.get("/memories/search/similar-keywords/{keyword}")
-async def search_similar_keywords(
-    keyword: str,
-    limit: int = 10,
-    start_date: str | None = None,
-    end_date: str | None = None
-) -> dict:
-    """Search memories by similar keywords with optional date filtering.
-    
-    Finds keywords similar to the given keyword and returns memories
-    containing those keywords.
-    
-    Args:
-        keyword: Keyword to search for similar matches
-        limit: Maximum number of results
-        start_date: Filter memories created on or after this date (ISO format)
-        end_date: Filter memories created on or before this date (ISO format)
-        
-    Returns:
-        List of matching memories with similarity scores
-    """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
-    # First get similar keyword results
-    memories = db.search_similar_keywords(keyword, limit)
-    
-    # Filter by date if needed
-    if start_date or end_date:
-        filtered = []
-        for mem in memories:
-            created = mem["created_at"]
-            if start_date and created < start_date:
-                continue
-            if end_date and created > end_date:
-                continue
-            filtered.append(mem)
-        memories = filtered
-    
-    return {"memories": memories}
-
-
-@app.post("/memories/search/similar")
-async def search_similar(request: SearchRequest) -> dict:
-    """Search memories by semantic similarity with optional date filtering.
-    
-    Args:
-        request: Query, limit, and optional date range
-        
-    Returns:
-        List of similar memories with scores
-    """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
-    memories = db.search_similar(request.query, request.limit)
-    
-    # Filter by date if needed
-    if request.start_date or request.end_date:
-        filtered = []
-        for mem in memories:
-            created = mem["created_at"]
-            if request.start_date and created < request.start_date:
-                continue
-            if request.end_date and created > request.end_date:
-                continue
-            filtered.append(mem)
-        memories = filtered
-    
-    return {"memories": memories}
-
-
-@app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: int) -> dict:
-    """Delete a memory.
-    
-    Args:
-        memory_id: ID of the memory to delete
-        
-    Returns:
-        Success message
-    """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
-    deleted = db.delete(memory_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    
-    return {"deleted": memory_id}
+    return results[0]
 
 
 @app.get("/stats")
@@ -224,7 +151,10 @@ async def get_stats() -> dict:
     if not db:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
-    return {"count": db.count()}
+    # Count memories
+    results = db.search("", limit=10000)
+    
+    return {"count": len(results)}
 
 
 if __name__ == "__main__":
