@@ -755,8 +755,43 @@ class SearchParser:
                 params = []
         
         elif search_type == SearchType.PROPERTY:
-            # Property filter - key=value format
-            if '=' in value:
+            # Property filter - key<value, key>value, key<=value, key>=value, key!=value, or key=value
+            # Examples:
+            #   p:opinion<0 - numeric less than
+            #   p:opinion>0 - numeric greater than
+            #   p:opinion<=0 - numeric less than or equal
+            #   p:opinion>=0 - numeric greater than or equal
+            #   p:opinion!=0 - not equal
+            #   p:role=user - string equality
+            
+            import re
+            # Match patterns like: key<value, key>value, key<=value, key>=value, key!=value
+            match = re.match(r'^(.+?)(<=|>=|!=|<|>)(.+)$', value)
+            
+            if match:
+                prop_key, operator, prop_val = match.groups()
+                prop_key = prop_key.lower()
+                
+                # Try to convert prop_val to number for numeric comparison
+                try:
+                    num_val = float(prop_val)
+                    # Numeric comparison - require stored value to actually be numeric
+                    # SQLite CAST('negative' AS REAL) returns 0, so we need to check
+                    # that the stored value looks numeric (digits, decimal, negative sign)
+                    sql = f"""EXISTS (
+                        SELECT 1 FROM memory_properties mp 
+                        WHERE mp.memory_id = m.id AND mp.key = ? 
+                        AND mp.value GLOB '*[0-9]*'
+                        AND mp.value GLOB '*[0-9.-]*'
+                        AND CAST(mp.value AS REAL) {operator} ?
+                    )"""
+                    params = [prop_key, num_val]
+                except ValueError:
+                    # Search value is not numeric - return no matches
+                    sql = " 1=0"
+                    params = []
+            elif '=' in value:
+                # Simple key=value format
                 prop_key, prop_val = value.split('=', 1)
                 sql = " EXISTS (SELECT 1 FROM memory_properties mp WHERE mp.memory_id = m.id AND mp.key = ? AND mp.value = ?)"
                 params = [prop_key.lower(), prop_val]
