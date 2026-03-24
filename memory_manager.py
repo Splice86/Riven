@@ -458,6 +458,56 @@ def check_llm_health(manager: MemoryManager) -> bool:
         return False
 
 
+def create_test_memories(manager: MemoryManager) -> dict:
+    """Create test memories in 3 topic groups with temporal spacing."""
+    from datetime import datetime, timezone, timedelta
+    
+    now = datetime.now(timezone.utc)
+    created_ids = {}
+    
+    # Group 1: Pets (memories from 2 hours ago)
+    pets_base = now - timedelta(hours=2)
+    pets = [
+        ("My dog Max loves to chase squirrels in the backyard every morning.", ["pets", "dog", "max"]),
+        ("I adopted a rescue cat named Luna last month. She's very shy but warming up.", ["pets", "cat", "luna"]),
+        ("Max and Luna don't get along yet. They mostly ignore each other.", ["pets", "dog", "cat", "max", "luna"]),
+    ]
+    pets_ids = []
+    for i, (content, keywords) in enumerate(pets):
+        m = manager.add(content, keywords=keywords, created_at=(pets_base + timedelta(minutes=i*10)).isoformat())
+        pets_ids.append(m.id)
+    created_ids["pets"] = pets_ids
+    
+    # Group 2: Gig work (memories from 1.5 hours ago)
+    gig_base = now - timedelta(hours=1.5)
+    gig_work = [
+        ("Did 5 Uber rides today. Made about $85 after expenses.", ["gig", "uber", "rides"]),
+        ("Delivered groceries for Instacart. Tips were good this week, $120 total.", ["gig", "instacart", "delivery"]),
+        ("Signed up for DoorDash. Need to complete 20 deliveries for the bonus.", ["gig", "doordash", "bonus"]),
+        ("My car needs an oil change. Been putting it off while doing gig work.", ["gig", "car", "maintenance"]),
+    ]
+    gig_ids = []
+    for i, (content, keywords) in enumerate(gig_work):
+        m = manager.add(content, keywords=keywords, created_at=(gig_base + timedelta(minutes=i*8)).isoformat())
+        gig_ids.append(m.id)
+    created_ids["gig"] = gig_ids
+    
+    # Group 3: Technical (memories from 1 hour ago)
+    tech_base = now - timedelta(hours=1)
+    technical = [
+        ("Fixed a memory leak in the Python agent. Was caused by unclosed database connections.", ["technical", "python", "debugging"]),
+        ("Refactored the API endpoints to use async/await properly. Performance improved 3x.", ["technical", "api", "performance"]),
+        ("Added a new feature to the memory search - temporal clustering by time gaps.", ["technical", "feature", "memory"]),
+    ]
+    tech_ids = []
+    for i, (content, keywords) in enumerate(technical):
+        m = manager.add(content, keywords=keywords, created_at=(tech_base + timedelta(minutes=i*12)).isoformat())
+        tech_ids.append(m.id)
+    created_ids["technical"] = tech_ids
+    
+    return created_ids
+
+
 def run_tests():
     """Run extensive tests of the MemoryManager."""
     print("=" * 60)
