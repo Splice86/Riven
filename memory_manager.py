@@ -381,6 +381,82 @@ class MemoryManager:
         
         return summaries
     
+    def get_rolling_clusters(
+        self,
+        min_cluster_size: int = 3,
+        max_gap_minutes: int = 60,
+        exclude_recent_minutes: int = 30
+    ) -> list[MemoryCluster]:
+        """
+        Adaptive clustering that shrinks gap until clusters meet min size.
+        
+        Starts with large time gap, progressively reduces until clusters
+        of sufficient size are found. This helps dense memories summarize
+        together while sparse memories still get grouped.
+        
+        Args:
+            min_cluster_size: Minimum memories in a cluster to be considered valid
+            max_gap_minutes: Starting gap to try (shrinks by half each iteration)
+            exclude_recent_minutes: How recent a cluster can be to be included
+            
+        Returns:
+            List of MemoryCluster objects meeting the size threshold
+        """
+        gap = max_gap_minutes
+        
+        while gap >= 5:
+            clusters = self.get_temporal_clusters(
+                gap_minutes=gap,
+                exclude_recent_minutes=exclude_recent_minutes,
+                exclude_summarized=False  # Include all for clustering
+            )
+            
+            # Filter to only clusters meeting min size
+            valid = [c for c in clusters if c.size >= min_cluster_size]
+            
+            if valid:
+                return valid
+            
+            # Shrink gap and try again
+            gap = gap // 2
+        
+        return []
+    
+    def summarize_rolling_clusters(
+        self,
+        min_cluster_size: int = 3,
+        max_gap_minutes: int = 60,
+        exclude_recent_minutes: int = 30
+    ) -> list[MemoryRef]:
+        """
+        Find and summarize clusters using adaptive rolling gaps.
+        
+        Args:
+            min_cluster_size: Minimum memories in a cluster to summarize
+            max_gap_minutes: Starting gap to try
+            exclude_recent_minutes: How recent a cluster can be
+            
+        Returns:
+            List of MemoryRef for created summaries
+        """
+        clusters = self.get_rolling_clusters(
+            min_cluster_size=min_cluster_size,
+            max_gap_minutes=max_gap_minutes,
+            exclude_recent_minutes=exclude_recent_minutes
+        )
+        
+        summaries = []
+        for cluster in clusters:
+            print(f"Rolling cluster: {cluster.size} memories (gap={max_gap_minutes//2 if cluster.size < 3 else max_gap_minutes}min)")
+            print(f"   Time: {cluster.start_time[:19]} to {cluster.end_time[:19]}")
+            summary = self.summarize_memories(
+                cluster.memory_ids,
+                keywords=["rolling_summary", "cluster"]
+            )
+            summaries.append(summary)
+        
+        return summaries
+    
     # --- Summarization ---
     
     def summarize_memory(self, memory_id: int, keywords: Optional[list[str]] = None) -> MemoryRef:
