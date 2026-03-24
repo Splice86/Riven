@@ -858,6 +858,11 @@ class SearchParser:
                 # Find memories that link TO the specified ID (sources of links where target_id = ID)
                 direction_check = "ml.source_id = m.id"
                 id_column = "target_id"
+            elif target:
+                # Has target but no direction - default to target direction
+                # l:summary_of:123 means "find memories that memory 123 links to via summary_of"
+                direction_check = "ml.source_id = m.id"
+                id_column = "target_id"
             else:
                 # Both directions (default) - find memories that have any link
                 direction_check = "(ml.source_id = m.id OR ml.target_id = m.id)"

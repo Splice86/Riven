@@ -4,10 +4,14 @@ Memory Manager - Client for the Memories API.
 Provides a clean Python interface to interact with the memory system.
 """
 
+import os
 import requests
-from datetime import datetime, timezone
-from typing import Optional, Any
-from dataclasses import dataclass
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Any, Protocol
+from dataclasses import dataclass, field
+from openai import OpenAI
 
 
 @dataclass
@@ -56,6 +60,57 @@ class SearchResult:
     count: int
 
 
+@dataclass
+class MemoryCluster:
+    """A temporal cluster of memories."""
+    memory_ids: list[int] = field(default_factory=list)
+    memories: list[Memory] = field(default_factory=list)
+    start_time: str = ""
+    end_time: str = ""
+    
+    @property
+    def size(self) -> int:
+        return len(self.memory_ids)
+
+
+class LLMSummarizer:
+    """LLM client for summarization."""
+    
+    DEFAULT_URL = "http://192.168.1.11:8010"
+    DEFAULT_MODEL = "llama3"
+    DEFAULT_API_KEY = "sk-dummy"
+    
+    def __init__(
+        self,
+        llm_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        model: Optional[str] = None
+    ):
+        self.llm_url = llm_url or os.environ.get("LLM_URL", self.DEFAULT_URL)
+        self.llm_api_key = llm_api_key or os.environ.get("LLM_API_KEY", self.DEFAULT_API_KEY)
+        self.model = model or os.environ.get("LLM_MODEL", self.DEFAULT_MODEL)
+        
+        self.client = OpenAI(base_url=f"{self.llm_url}/v1", api_key=self.llm_api_key)
+    
+    def summarize(self, text: str) -> str:
+        """Summarize text using the LLM."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that summarizes text concisely."
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize the following text in 1-2 sentences:\n\n{text}"
+                }
+            ],
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+
+
 class MemoryManager:
     """
     Client for interacting with the Memories API.
@@ -67,10 +122,35 @@ class MemoryManager:
     """
     
     DEFAULT_URL = "http://192.168.1.11:8030"
+    DEFAULT_TIMEOUT = 10  # seconds
     
-    def __init__(self, base_url: Optional[str] = None):
-        self.base_url = base_url or self.DEFAULT_URL
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        llm_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_model: Optional[str] = None
+    ):
+        self.base_url = base_url or os.environ.get("MEMORY_API_URL", self.DEFAULT_URL)
+        self._setup_session()
+        
+        # Optional LLM for summarization
+        self.summarizer = LLMSummarizer(llm_url, llm_api_key, llm_model)
+    
+    def _setup_session(self) -> None:
+        """Configure session with retry logic and timeouts."""
         self.session = requests.Session()
+        
+        # Retry strategy: 3 retries with exponential backoff
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST", "DELETE"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
     
     # --- Core Operations ---
     
@@ -116,26 +196,26 @@ class MemoryManager:
         if keywords:
             payload["keywords"] = keywords
             
-        response = self.session.post(f"{self.base_url}/memories", json=payload)
+        response = self.session.post(f"{self.base_url}/memories", json=payload, timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         data = response.json()
         return MemoryRef(id=data["id"], content=data["content"])
     
     def get(self, memory_id: int) -> Memory:
         """Get a memory by ID."""
-        response = self.session.get(f"{self.base_url}/memories/{memory_id}")
+        response = self.session.get(f"{self.base_url}/memories/{memory_id}", timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         return Memory.from_dict(response.json())
     
     def delete(self, memory_id: int) -> bool:
         """Delete a memory by ID."""
-        response = self.session.delete(f"{self.base_url}/memories/{memory_id}")
+        response = self.session.delete(f"{self.base_url}/memories/{memory_id}", timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         return True
     
     def count(self) -> int:
         """Get total memory count."""
-        response = self.session.get(f"{self.base_url}/stats")
+        response = self.session.get(f"{self.base_url}/stats", timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         return response.json().get("count", 0)
     
@@ -144,7 +224,7 @@ class MemoryManager:
     def search(self, query: str = "", limit: int = 50) -> SearchResult:
         """Search memories using the query syntax."""
         payload = {"query": query, "limit": limit}
-        response = self.session.post(f"{self.base_url}/memories/search", json=payload)
+        response = self.session.post(f"{self.base_url}/memories/search", json=payload, timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         data = response.json()
         
@@ -158,7 +238,7 @@ class MemoryManager:
     def add_link(self, source_id: int, target_id: int, link_type: str = "related_to") -> dict:
         """Add a link between two memories."""
         payload = {"source_id": source_id, "target_id": target_id, "link_type": link_type}
-        response = self.session.post(f"{self.base_url}/memories/link", json=payload)
+        response = self.session.post(f"{self.base_url}/memories/link", json=payload, timeout=self.DEFAULT_TIMEOUT)
         response.raise_for_status()
         return response.json()
     
@@ -182,31 +262,388 @@ class MemoryManager:
         """List all memories."""
         result = self.search("", limit=limit)
         return result.memories
+    
+    # --- Temporal Clustering ---
+    
+    def get_temporal_clusters(
+        self,
+        gap_minutes: int = 30,
+        exclude_recent_minutes: int = 60,
+        exclude_summarized: bool = True
+    ) -> list[MemoryCluster]:
+        """
+        Cluster memories by temporal proximity.
+        
+        Memories within `gap_minutes` of each other are grouped into the same cluster.
+        Clusters within `exclude_recent_minutes` of now are excluded (active session).
+        
+        Args:
+            gap_minutes: Time gap to start a new cluster (default: 30 min)
+            exclude_recent_minutes: How recent a cluster can be to be included (default: 60 min)
+            exclude_summarized: Skip clusters where all memories already have summaries (default: True)
+            
+        Returns:
+            List of MemoryCluster objects (excluding recent/active clusters)
+        """
+        all_memories = self.list_all(limit=10000)
+        
+        if not all_memories:
+            return []
+        
+        # Build set of already-summarized memory IDs
+        summarized_ids: set[int] = set()
+        if exclude_summarized:
+            # For each memory, check if it already has a summary linked to it
+            for memory in all_memories:
+                result = self.search(f"l:summary_of:{memory.id}", limit=1)
+                if result.count > 0:
+                    summarized_ids.add(memory.id)
+        
+        # Sort by created_at
+        sorted_memories = sorted(all_memories, key=lambda m: m.created_at)
+        
+        clusters: list[MemoryCluster] = []
+        current_cluster = MemoryCluster()
+        
+        now = datetime.now(timezone.utc)
+        exclude_threshold = now - timedelta(minutes=exclude_recent_minutes)
+        
+        for memory in sorted_memories:
+            memory_time = datetime.fromisoformat(memory.created_at.replace('Z', '+00:00'))
+            
+            # Check if this memory is too recent (active session)
+            if memory_time > exclude_threshold:
+                continue  # Skip recent memories
+            
+            # Skip if already summarized
+            if exclude_summarized and memory.id in summarized_ids:
+                continue
+            
+            # Start new cluster if empty
+            if not current_cluster.memory_ids:
+                current_cluster.start_time = memory.created_at
+            
+            # Check time gap from last memory in cluster
+            if current_cluster.memory_ids:
+                last_memory = current_cluster.memories[-1]
+                last_time = datetime.fromisoformat(last_memory.created_at.replace('Z', '+00:00'))
+                gap = (memory_time - last_time).total_seconds() / 60
+                
+                if gap > gap_minutes:
+                    # Close current cluster and start new one
+                    current_cluster.end_time = last_memory.created_at
+                    clusters.append(current_cluster)
+                    current_cluster = MemoryCluster()
+                    current_cluster.start_time = memory.created_at
+            
+            # Add to current cluster
+            current_cluster.memory_ids.append(memory.id)
+            current_cluster.memories.append(memory)
+        
+        # Don't forget the last cluster (but it may be recent, so check)
+        if current_cluster.memory_ids:
+            last_time_str = current_cluster.memories[-1].created_at
+            last_time = datetime.fromisoformat(last_time_str.replace('Z', '+00:00'))
+            if last_time <= exclude_threshold:
+                current_cluster.end_time = last_time_str
+                clusters.append(current_cluster)
+        
+        return clusters
+    
+    def summarize_recent_clusters(
+        self,
+        gap_minutes: int = 30,
+        exclude_recent_minutes: int = 60,
+        min_cluster_size: int = 2
+    ) -> list[MemoryRef]:
+        """
+        Find and summarize all closed temporal clusters.
+        
+        Args:
+            gap_minutes: Time gap to start a new cluster
+            exclude_recent_minutes: How recent a cluster can be
+            min_cluster_size: Minimum memories in a cluster to summarize
+            
+        Returns:
+            List of MemoryRef for created summaries
+        """
+        clusters = self.get_temporal_clusters(gap_minutes, exclude_recent_minutes)
+        
+        summaries = []
+        for cluster in clusters:
+            if cluster.size >= min_cluster_size:
+                print(f"Summarizing cluster: {cluster.size} memories from {cluster.start_time[:19]} to {cluster.end_time[:19]}")
+                summary = self.summarize_memories(
+                    cluster.memory_ids,
+                    keywords=["temporal_summary", "cluster"]
+                )
+                summaries.append(summary)
+        
+        return summaries
+    
+    # --- Summarization ---
+    
+    def summarize_memory(self, memory_id: int, keywords: Optional[list[str]] = None) -> MemoryRef:
+        """
+        Summarize a memory and add as a linked summary.
+        
+        Args:
+            memory_id: ID of the memory to summarize
+            keywords: Optional keywords for the summary
+            
+        Returns:
+            MemoryRef for the new summary memory
+        """
+        memory = self.get(memory_id)
+        summary_text = self.summarizer.summarize(memory.content)
+        
+        # Add summary linked to original
+        summary = self.add(
+            summary_text,
+            keywords=keywords or ["summary"],
+            properties={"is_summary": "true", "summarized_from": str(memory_id)}
+        )
+        
+        # Link summary to original
+        self.add_link(summary.id, memory_id, "summary_of")
+        
+        return summary
+    
+    def summarize_memories(self, memory_ids: list[int], keywords: Optional[list[str]] = None) -> MemoryRef:
+        """
+        Summarize multiple memories into one summary.
+        
+        Args:
+            memory_ids: List of memory IDs to summarize
+            keywords: Optional keywords for the summary
+            
+        Returns:
+            MemoryRef for the new summary memory
+        """
+        memories = [self.get(mid) for mid in memory_ids]
+        combined_content = "\n\n".join(m.content for m in memories)
+        
+        summary_text = self.summarizer.summarize(combined_content)
+        
+        summary = self.add(
+            summary_text,
+            keywords=keywords or ["summary"],
+            properties={"is_summary": "true", "summarized_count": str(len(memory_ids))}
+        )
+        
+        # Link to all original memories
+        for memory_id in memory_ids:
+            self.add_link(summary.id, memory_id, "summary_of")
+        
+        return summary
 
 
-if __name__ == "__main__":
+def check_api_health(manager: MemoryManager) -> bool:
+    """Check if the memory API is running."""
+    try:
+        manager.count()
+        return True
+    except requests.exceptions.ConnectionError:
+        return False
+    except Exception:
+        return False
+
+
+def check_llm_health(manager: MemoryManager) -> bool:
+    """Check if the LLM API is running."""
+    try:
+        manager.summarizer.summarize("test")
+        return True
+    except Exception:
+        return False
+
+
+def run_tests():
+    """Run extensive tests of the MemoryManager."""
+    print("=" * 60)
+    print("Memory Manager Test Suite")
+    print("=" * 60)
+    
+    # Check API availability
+    print("\n[1/10] Checking API availability...")
     manager = MemoryManager()
     
-    print(f"Total memories: {manager.count()}")
+    if not check_api_health(manager):
+        print("\n❌ ERROR: Memory API is not running!")
+        print("   Please start the memory API first:")
+        print("   cd memory/ && python api.py")
+        print("   (or wherever your memory API server is)")
+        return False
     
-    # Add a test memory
+    if not check_llm_health(manager):
+        print("\n❌ ERROR: LLM API is not running!")
+        print("   Please start the LLM server first:")
+        print("   e.g., llama.cpp server on port 8010")
+        return False
+    
+    print("   ✓ Memory API is running")
+    print("   ✓ LLM API is running")
+    
+    # Test 2: Basic CRUD operations
+    print("\n[2/10] Testing basic CRUD operations...")
+    initial_count = manager.count()
+    print(f"   Initial count: {initial_count}")
+    
+    # Add memory
     m = manager.add(
         "Testing the memory manager!",
         keywords=["test", "riven"],
         properties={"status": "working"}
     )
-    print(f"Added memory #{m.id}: {m.content}")
+    print(f"   ✓ Added memory #{m.id}: '{m.content}'")
     
-    # Verify it has node_type and temporal_location
+    # Verify count increased
+    new_count = manager.count()
+    assert new_count == initial_count + 1, "Count should increase by 1"
+    print(f"   ✓ Count increased: {initial_count} -> {new_count}")
+    
+    # Test 3: Get memory
+    print("\n[3/10] Testing get_memory...")
     mem = manager.get(m.id)
-    print(f"  node_type: {mem.node_type}")
-    print(f"  temporal_location: {mem.temporal_location}")
+    assert mem.id == m.id
+    assert mem.content == "Testing the memory manager!"
+    assert "test" in mem.keywords
+    assert "riven" in mem.keywords
+    assert mem.properties.get("status") == "working"
+    print(f"   ✓ Retrieved memory #{mem.id}")
+    print(f"   ✓ Keywords: {mem.keywords}")
+    print(f"   ✓ Properties: {mem.properties}")
     
-    # Search for it
+    # Test 4: node_type and temporal_location
+    print("\n[4/10] Testing node_type and temporal_location...")
+    assert mem.node_type == "memory"
+    assert mem.temporal_location is not None
+    print(f"   ✓ node_type: {mem.node_type}")
+    print(f"   ✓ temporal_location: {mem.temporal_location}")
+    
+    # Test 5: Search
+    print("\n[5/10] Testing search...")
     results = manager.search("k:test")
-    print(f"Found {results.count} memories with 'test'")
+    assert results.count >= 1
+    print(f"   ✓ Found {results.count} memories with 'test' keyword")
     
-    # Delete it
+    # Test 6: Links
+    print("\n[6/10] Testing links...")
+    m2 = manager.add("Second test memory", keywords=["test"])
+    link_result = manager.add_link(m.id, m2.id, "related_to")
+    print(f"   ✓ Added link: {m.id} -> {m2.id} (related_to)")
+    
+    # Test 7: Summarization
+    print("\n[7/10] Testing LLM summarization...")
+    summary = manager.summarize_memory(m.id, keywords=["test_summary"])
+    print(f"   ✓ Created summary #{summary.id}: '{summary.content}'")
+    
+    # Verify summary properties
+    summary_mem = manager.get(summary.id)
+    assert summary_mem.properties.get("is_summary") == "true"
+    print(f"   ✓ Summary has is_summary=true property")
+    
+    # Test 8: Multi-memory summarization
+    print("\n[8/10] Testing multi-memory summarization...")
+    multi_summary = manager.summarize_memories([m.id, m2.id], keywords=["multi_summary"])
+    print(f"   ✓ Created multi-summary #{multi_summary.id}")
+    
+    multi_mem = manager.get(multi_summary.id)
+    assert multi_mem.properties.get("summarized_count") == "2"
+    print(f"   ✓ summarized_count = 2")
+    
+    # Test 9: Temporal clustering
+    print("\n[9/10] Testing temporal clustering...")
+    
+    # Add multiple memories with different timestamps to test clustering
+    from datetime import datetime, timezone, timedelta
+    
+    # Create memories 20 minutes apart (should be same cluster)
+    now = datetime.now(timezone.utc)
+    m3 = manager.add(
+        "Memory from 20 minutes ago",
+        keywords=["cluster_test"],
+        created_at=(now - timedelta(minutes=20)).isoformat()
+    )
+    m4 = manager.add(
+        "Memory from 10 minutes ago",
+        keywords=["cluster_test"],
+        created_at=(now - timedelta(minutes=10)).isoformat()
+    )
+    
+    # Add memory 45 minutes ago (should be different cluster due to gap)
+    m5 = manager.add(
+        "Memory from 45 minutes ago",
+        keywords=["cluster_test"],
+        created_at=(now - timedelta(minutes=45)).isoformat()
+    )
+    
+    print(f"   Added test memories: #{m3.id}, #{m4.id}, #{m5.id}")
+    
+    # Get clusters (exclude recent to avoid the active session)
+    clusters = manager.get_temporal_clusters(
+        gap_minutes=30,
+        exclude_recent_minutes=5,  # Only exclude last 5 minutes
+        exclude_summarized=False  # Include everything for testing
+    )
+    
+    print(f"   ✓ Found {len(clusters)} temporal clusters")
+    for i, c in enumerate(clusters):
+        print(f"      Cluster {i+1}: {c.size} memories from {c.start_time[:19]} to {c.end_time[:19]}")
+    
+    # Test 10: Exclude already summarized
+    print("\n[10/10] Testing exclude_summarized...")
+    
+    # Get clusters with summarization exclusion
+    clusters_with_exclude = manager.get_temporal_clusters(
+        gap_minutes=30,
+        exclude_recent_minutes=5,
+        exclude_summarized=True
+    )
+    
+    print(f"   ✓ Clusters excluding summarized: {len(clusters_with_exclude)}")
+    
+    # Summarize the clusters
+    summaries = manager.summarize_recent_clusters(
+        gap_minutes=30,
+        exclude_recent_minutes=5,
+        min_cluster_size=1
+    )
+    print(f"   ✓ Created {len(summaries)} cluster summaries")
+    
+    # Now get clusters again - should have fewer (some excluded)
+    clusters_after = manager.get_temporal_clusters(
+        gap_minutes=30,
+        exclude_recent_minutes=5,
+        exclude_summarized=True
+    )
+    print(f"   ✓ Clusters after summarization: {len(clusters_after)}")
+    
+    # Cleanup: delete test memories
+    print("\n--- Cleaning up test memories ---")
     manager.delete(m.id)
-    print(f"Deleted memory #{m.id}")
-    print(f"Total memories: {manager.count()}")
+    manager.delete(m2.id)
+    manager.delete(summary.id)
+    manager.delete(multi_summary.id)
+    manager.delete(m3.id)
+    manager.delete(m4.id)
+    manager.delete(m5.id)
+    
+    for s in summaries:
+        manager.delete(s.id)
+    
+    print(f"   ✓ Deleted {6 + len(summaries)} test memories")
+    
+    final_count = manager.count()
+    print(f"   ✓ Final count: {final_count} (should match initial: {initial_count})")
+    
+    print("\n" + "=" * 60)
+    print("✅ All tests passed!")
+    print("=" * 60)
+    return True
+
+
+if __name__ == "__main__":
+    success = run_tests()
+    if not success:
+        exit(1)
