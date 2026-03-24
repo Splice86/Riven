@@ -457,6 +457,135 @@ class MemoryManager:
         
         return summaries
     
+    def check_summarization_needed(
+        self,
+        max_messages: int = 50,
+        min_cluster_size: int = 3,
+        max_gap_minutes: int = 60,
+        exclude_recent_minutes: int = 30
+    ) -> dict:
+        """
+        Examine database to determine if summarization is needed.
+        
+        Checks:
+        1. Total memory count exceeds max_messages
+        2. Natural clusters exist that meet min_cluster_size
+        3. Forces rolling clustering if over max_messages
+        
+        Args:
+            max_messages: Threshold to force clustering (default 50)
+            min_cluster_size: Minimum cluster size to consider
+            max_gap_minutes: Starting gap for rolling clustering
+            exclude_recent_minutes: How recent memories to exclude
+            
+        Returns:
+            dict with keys:
+                - needs_summarization: bool
+                - reason: str ('natural_cluster', 'force_rollback', 'none')
+                - memory_count: int
+                - clusters_found: int
+                - clusters: list of MemoryCluster
+        """
+        total_count = self.count()
+        
+        result = {
+            'needs_summarization': False,
+            'reason': 'none',
+            'memory_count': total_count,
+            'clusters_found': 0,
+            'clusters': []
+        }
+        
+        if total_count < 10:
+            # Not enough memories to consider summarization
+            return result
+        
+        # Check for natural clusters at default gap
+        natural_clusters = self.get_temporal_clusters(
+            gap_minutes=max_gap_minutes,
+            exclude_recent_minutes=exclude_recent_minutes,
+            exclude_summarized=True
+        )
+        
+        # Filter to clusters meeting min size
+        valid_clusters = [c for c in natural_clusters if c.size >= min_cluster_size]
+        
+        if valid_clusters:
+            # There are natural clusters ready to summarize
+            result['needs_summarization'] = True
+            result['reason'] = 'natural_cluster'
+            result['clusters_found'] = len(valid_clusters)
+            result['clusters'] = valid_clusters
+            return result
+        
+        # No valid clusters found - check if we need to force rollback
+        if total_count >= max_messages:
+            # Force rolling clustering to find smaller clusters
+            rolling_clusters = self.get_rolling_clusters(
+                min_cluster_size=2,  # Lower threshold for forced clustering
+                max_gap_minutes=max_gap_minutes,
+                exclude_recent_minutes=exclude_recent_minutes
+            )
+            
+            if rolling_clusters:
+                result['needs_summarization'] = True
+                result['reason'] = 'force_rollback'
+                result['clusters_found'] = len(rolling_clusters)
+                result['clusters'] = rolling_clusters
+            else:
+                result['reason'] = 'no_clusters'
+        else:
+            result['reason'] = 'under_threshold'
+        
+        return result
+    
+    def auto_summarize_if_needed(
+        self,
+        max_messages: int = 50,
+        min_cluster_size: int = 3,
+        max_gap_minutes: int = 60,
+        exclude_recent_minutes: int = 30
+    ) -> list[MemoryRef]:
+        """
+        Check if summarization needed and perform it automatically.
+        
+        Args:
+            max_messages: Threshold to force clustering
+            min_cluster_size: Minimum cluster size
+            max_gap_minutes: Starting gap for rolling
+            exclude_recent_minutes: How recent to exclude
+            
+        Returns:
+            List of MemoryRef for created summaries, or empty list if nothing done
+        """
+        check = self.check_summarization_needed(
+            max_messages=max_messages,
+            min_cluster_size=min_cluster_size,
+            max_gap_minutes=max_gap_minutes,
+            exclude_recent_minutes=exclude_recent_minutes
+        )
+        
+        if not check['needs_summarization']:
+            print(f"No summarization needed ({check['reason']})")
+            return []
+        
+        print(f"Summarization needed: {check['reason']}")
+        print(f"  Memory count: {check['memory_count']}")
+        print(f"  Clusters found: {check['clusters_found']}")
+        
+        # Summarize the clusters
+        summaries = []
+        for cluster in check['clusters']:
+            if cluster.size >= min_cluster_size:
+                summary = self.summarize_memories(
+                    cluster.memory_ids,
+                    keywords=["auto_summary", "cluster"]
+                )
+                summaries.append(summary)
+                print(f"  Summarized {cluster.size} memories")
+        
+        return summaries
+    
     # --- Summarization ---
     
     def summarize_memory(self, memory_id: int, keywords: Optional[list[str]] = None) -> MemoryRef:
