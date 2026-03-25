@@ -1,16 +1,40 @@
 """Memory API server - FastAPI endpoints for memory storage and search."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from database import MemoryDB, init_db
 import numpy as np
+import os
 
 app = FastAPI(title="Riven Memory API")
 
-# Global database instance
-db: MemoryDB | None = None
+# Default DB name
+DEFAULT_DB = "default"
+
+# Directory for DB files
+DB_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def get_db_path(db_name: str) -> str:
+    """Get full path for a DB file."""
+    if not db_name:
+        db_name = DEFAULT_DB
+    if not db_name.endswith(".db"):
+        db_name = f"{db_name}.db"
+    return os.path.join(DB_DIR, db_name)
+
+
+def get_or_create_db(db_name: str) -> MemoryDB:
+    """Get or create a database instance."""
+    db_path = get_db_path(db_name)
+    init_db(db_path)
+    return MemoryDB(db_path=db_path)
+
+
+# Cache for DB instances (per process)
+_db_cache: dict[str, MemoryDB] = {}
 
 
 class AddMemoryRequest(BaseModel):
@@ -50,27 +74,64 @@ class EmbedRequest(BaseModel):
     text: str
 
 
-@app.on_event("startup")
-async def startup():
-    """Initialize the database on startup."""
-    global db
-    init_db()
-    db = MemoryDB()
+# Database dependency - gets DB from query param
+def get_db(db_name: str = Query(DEFAULT_DB, description="Database name (without .db)")) -> MemoryDB:
+    """Get or create a database instance for the requested DB name.
+    
+    Auto-creates the database if it doesn't exist.
+    """
+    if db_name not in _db_cache:
+        _db_cache[db_name] = get_or_create_db(db_name)
+    return _db_cache[db_name]
+
+
+@app.post("/db/create")
+async def create_database(name: str = Query(..., description="Database name to create")) -> dict:
+    """Create a new database.
+    
+    Args:
+        name: Name for the new database (without .db extension)
+        
+    Returns:
+        Success message with DB path
+    """
+    db_path = get_db_path(name)
+    
+    if os.path.exists(db_path):
+        return {"message": "Database already exists", "name": name, "path": db_path}
+    
+    init_db(db_path)
+    # Initialize the DB instance
+    _db_cache[name] = MemoryDB(db_path=db_path)
+    
+    return {"message": "Database created", "name": name, "path": db_path}
+
+
+@app.get("/db/list")
+async def list_databases() -> dict:
+    """List all existing databases."""
+    db_files = [f[:-3] for f in os.listdir(DB_DIR) if f.endswith(".db")]
+    return {"databases": db_files}
+
+
+@app.get("/db/exists/{name}")
+async def check_database_exists(name: str) -> dict:
+    """Check if a database exists."""
+    db_path = get_db_path(name)
+    return {"exists": os.path.exists(db_path), "name": name}
 
 
 @app.post("/memories")
-async def add_memory(request: AddMemoryRequest) -> dict:
+async def add_memory(request: AddMemoryRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Add a new memory with optional keywords and properties.
     
     Args:
         request: Memory content, optional keywords, properties, and created_at timestamp
+        db: Database name (query param)
         
     Returns:
         The ID of the created memory
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-    
     memory_id = db.add_memory(
         content=request.content,
         keywords=request.keywords,
@@ -82,7 +143,7 @@ async def add_memory(request: AddMemoryRequest) -> dict:
 
 
 @app.post("/memories/summary")
-async def add_summary(request: AddSummaryRequest) -> dict:
+async def add_summary(request: AddSummaryRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Add a summary memory and link it to target memories.
     
     The created_at timestamp is required and should be set by the agent
@@ -90,12 +151,11 @@ async def add_summary(request: AddSummaryRequest) -> dict:
     
     Args:
         request: Summary content, keywords, properties, created_at, target_ids, link_type
+        db: Database name (query param)
         
     Returns:
         The ID of the created summary memory
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Add the summary memory
     summary_id = db.add_memory(
@@ -117,17 +177,16 @@ async def add_summary(request: AddSummaryRequest) -> dict:
 
 
 @app.post("/memories/link")
-async def add_link(request: AddLinkRequest) -> dict:
-    """Add a link between two existing memories.
+async def add_link(request: AddLinkRequest, db: MemoryDB = Depends(get_db)) -> dict:
+    """Add a link between two memories.
     
     Args:
         request: source_id, target_id, link_type
+        db: Database name (query param)
         
     Returns:
         Success message with link details
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     db.add_link(
         source_id=request.source_id,
@@ -144,17 +203,16 @@ async def add_link(request: AddLinkRequest) -> dict:
 
 
 @app.post("/memories/search")
-async def search_memories(request: SearchRequest) -> dict:
+async def search_memories(request: SearchRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Search memories using the query DSL.
     
     Args:
         request: Query string and limit
+        db: Database name (query param)
         
     Returns:
         List of matching memories
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     results = db.search(request.query, limit=request.limit)
     
@@ -162,18 +220,17 @@ async def search_memories(request: SearchRequest) -> dict:
 
 
 @app.get("/memories")
-async def list_memories(limit: int = 50, offset: int = 0) -> dict:
+async def list_memories(limit: int = 50, offset: int = 0, db: MemoryDB = Depends(get_db)) -> dict:
     """List all memories with pagination.
     
     Args:
         limit: Maximum number of memories to return
         offset: Number of memories to skip
+        db: Database name (query param)
         
     Returns:
         List of memories
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     results = db.search("", limit=limit + offset)
     return {
@@ -185,17 +242,16 @@ async def list_memories(limit: int = 50, offset: int = 0) -> dict:
 
 
 @app.get("/memories/{memory_id}")
-async def get_memory(memory_id: int) -> dict:
+async def get_memory(memory_id: int, db: MemoryDB = Depends(get_db)) -> dict:
     """Get a memory by ID.
     
     Args:
         memory_id: The ID of the memory
+        db: Database name (query param)
         
     Returns:
         The memory data
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     memory = db.get_memory(memory_id)
     if not memory:
@@ -205,17 +261,16 @@ async def get_memory(memory_id: int) -> dict:
 
 
 @app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: int) -> dict:
+async def delete_memory(memory_id: int, db: MemoryDB = Depends(get_db)) -> dict:
     """Delete a memory by ID.
     
     Args:
         memory_id: The ID of the memory to delete
+        db: Database name (query param)
         
     Returns:
         Success message
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     deleted = db.delete_memory(memory_id)
     if not deleted:
@@ -224,18 +279,43 @@ async def delete_memory(memory_id: int) -> dict:
     return {"deleted": memory_id, "message": "Memory deleted successfully"}
 
 
+class UpdateMemoryRequest(BaseModel):
+    """Request to update a memory."""
+    properties: dict[str, str] | None = None
+    keywords: list[str] | None = None
+
+
+@app.put("/memories/{memory_id}")
+async def update_memory(memory_id: int, request: UpdateMemoryRequest, db: MemoryDB = Depends(get_db)) -> dict:
+    """Update a memory's properties and/or keywords.
+    
+    Args:
+        memory_id: The ID of the memory to update
+        request: Update request with properties and/or keywords
+        db: Database name (query param)
+        
+    Returns:
+        Updated memory data
+    """
+    
+    updated = db.update_memory(memory_id, request.properties, request.keywords)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    
+    return updated
+
+
 @app.post("/embed")
-async def get_embedding(request: EmbedRequest) -> dict:
+async def get_embedding(request: EmbedRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Get embedding vector for text.
     
     Args:
         request: Text to embed
+        db: Database name (query param)
         
     Returns:
         Embedding vector as list of floats
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     embedding = db.embedding.get(request.text)
     
@@ -247,14 +327,15 @@ async def get_embedding(request: EmbedRequest) -> dict:
 
 
 @app.get("/stats")
-async def get_stats() -> dict:
+async def get_stats(db: MemoryDB = Depends(get_db)) -> dict:
     """Get memory statistics.
     
+    Args:
+        db: Database name (query param)
+        
     Returns:
         Count of memories
     """
-    if not db:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     results = db.search("", limit=10000)
     

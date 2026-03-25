@@ -28,16 +28,18 @@ class Core:
         llm_api_key: str = "sk-dummy",
         max_retries: int = 3,
         retry_delay: float = 1.0,
+        db_name: str = "default"
     ):
         self.model = model
         self.llm_url = llm_url
         self.llm_api_key = llm_api_key
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.db_name = db_name
 
         self._modules = ModuleRegistry()
         self._system_context = SystemContext(system_prompt)
-        self._activity_log = ActivityLog()
+        self._activity_log = ActivityLog(db_name=db_name)
         
         # Auto-register all discovered modules
         for module in get_all_modules():
@@ -126,8 +128,10 @@ class Core:
         
         # Get updated system prompt
         system_prompt = self._system_context.apply_tags(replacements)
-        history = self._activity_log.get_history()
-        full_prompt = f"Previous conversation:\n{history}\n\nCurrent: {prompt}" if history else prompt
+        
+        # Get context from memory-backed activity log
+        context = self._activity_log.get_context_for_prompt()
+        full_prompt = f"Previous conversation:\n{context}\n\nCurrent: {prompt}" if context != "(No conversation history)" else prompt
         
         result = await self._run_with_retry(system_prompt, full_prompt)
         self._activity_log.add_assistant(str(result.output))
@@ -137,8 +141,9 @@ class Core:
 
 async def main():
     """Interactive REPL for the agent."""
-    system_prompt = """You are riven, a helpful AI assistant.
+    system_prompt = """{{bio}}
 
+---
 Current time: {{time}}
 
 Open documents:

@@ -5,6 +5,30 @@ Provides a clean Python interface to interact with the memory system.
 """
 
 import os
+import sys
+
+# Try to import local config first (user overrides), then fallback to defaults
+try:
+    from config_local import (
+        MEMORY_API_URL as DEFAULT_MEMORY_URL,
+        LLM_URL,
+        LLM_API_KEY,
+        LLM_MODEL
+    )
+except ImportError:
+    try:
+        from config import (
+            MEMORY_API_URL as DEFAULT_MEMORY_URL,
+            LLM_URL,
+            LLM_API_KEY,
+            LLM_MODEL
+        )
+    except ImportError:
+        DEFAULT_MEMORY_URL = "http://127.0.0.1:8030"
+        LLM_URL = "http://127.0.0.1:8080"
+        LLM_API_KEY = "sk-dummy"
+        LLM_MODEL = "llama3"
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -76,7 +100,7 @@ class MemoryCluster:
 class LLMSummarizer:
     """LLM client for summarization."""
     
-    DEFAULT_URL = "http://192.168.1.11:8010"
+    DEFAULT_URL = os.environ.get("LLM_URL", LLM_URL)
     DEFAULT_MODEL = "llama3"
     DEFAULT_API_KEY = "sk-dummy"
     
@@ -121,17 +145,19 @@ class MemoryManager:
         results = manager.search("k:tag1")
     """
     
-    DEFAULT_URL = "http://192.168.1.11:8030"
+    DEFAULT_URL = os.environ.get("MEMORY_API_URL", DEFAULT_MEMORY_URL)
     DEFAULT_TIMEOUT = 10  # seconds
     
     def __init__(
         self,
         base_url: Optional[str] = None,
+        db_name: str = "default",
         llm_url: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None
     ):
         self.base_url = base_url or os.environ.get("MEMORY_API_URL", self.DEFAULT_URL)
+        self.db_name = db_name
         self._setup_session()
         
         # Optional LLM for summarization
@@ -185,7 +211,9 @@ class MemoryManager:
         
         # Build properties with defaults
         props = properties or {}
-        props["node_type"] = node_type
+        # Only set node_type if not already in properties
+        if "node_type" not in props:
+            props["node_type"] = node_type
         props["temporal_location"] = props.get("temporal_location", created_at)
             
         payload = {
@@ -196,26 +224,54 @@ class MemoryManager:
         if keywords:
             payload["keywords"] = keywords
             
-        response = self.session.post(f"{self.base_url}/memories", json=payload, timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.post(
+            f"{self.base_url}/memories",
+            params={"db_name": self.db_name},
+            json=payload,
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         data = response.json()
         return MemoryRef(id=data["id"], content=data["content"])
     
     def get(self, memory_id: int) -> Memory:
         """Get a memory by ID."""
-        response = self.session.get(f"{self.base_url}/memories/{memory_id}", timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.get(
+            f"{self.base_url}/memories/{memory_id}",
+            params={"db_name": self.db_name},
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         return Memory.from_dict(response.json())
     
     def delete(self, memory_id: int) -> bool:
         """Delete a memory by ID."""
-        response = self.session.delete(f"{self.base_url}/memories/{memory_id}", timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.delete(
+            f"{self.base_url}/memories/{memory_id}",
+            params={"db_name": self.db_name},
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         return True
     
+    def update(self, memory_id: int, properties: dict[str, Any]) -> Memory:
+        """Update memory properties."""
+        response = self.session.put(
+            f"{self.base_url}/memories/{memory_id}",
+            params={"db_name": self.db_name},
+            json={"properties": properties},
+            timeout=self.DEFAULT_TIMEOUT
+        )
+        response.raise_for_status()
+        return Memory.from_dict(response.json())
+    
     def count(self) -> int:
         """Get total memory count."""
-        response = self.session.get(f"{self.base_url}/stats", timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.get(
+            f"{self.base_url}/stats",
+            params={"db_name": self.db_name},
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         return response.json().get("count", 0)
     
@@ -224,7 +280,12 @@ class MemoryManager:
     def search(self, query: str = "", limit: int = 50) -> SearchResult:
         """Search memories using the query syntax."""
         payload = {"query": query, "limit": limit}
-        response = self.session.post(f"{self.base_url}/memories/search", json=payload, timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.post(
+            f"{self.base_url}/memories/search",
+            params={"db_name": self.db_name},
+            json=payload,
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         data = response.json()
         
@@ -238,7 +299,12 @@ class MemoryManager:
     def add_link(self, source_id: int, target_id: int, link_type: str = "related_to") -> dict:
         """Add a link between two memories."""
         payload = {"source_id": source_id, "target_id": target_id, "link_type": link_type}
-        response = self.session.post(f"{self.base_url}/memories/link", json=payload, timeout=self.DEFAULT_TIMEOUT)
+        response = self.session.post(
+            f"{self.base_url}/memories/link",
+            params={"db_name": self.db_name},
+            json=payload,
+            timeout=self.DEFAULT_TIMEOUT
+        )
         response.raise_for_status()
         return response.json()
     
@@ -269,7 +335,8 @@ class MemoryManager:
         self,
         gap_minutes: int = 30,
         exclude_recent_minutes: int = 60,
-        exclude_summarized: bool = True
+        exclude_summarized: bool = True,
+        query_filter: str = ""
     ) -> list[MemoryCluster]:
         """
         Cluster memories by temporal proximity.
@@ -281,11 +348,16 @@ class MemoryManager:
             gap_minutes: Time gap to start a new cluster (default: 30 min)
             exclude_recent_minutes: How recent a cluster can be to be included (default: 60 min)
             exclude_summarized: Skip clusters where all memories already have summaries (default: True)
+            query_filter: Optional search query to filter memories before clustering (e.g., "p:node_type=context")
             
         Returns:
             List of MemoryCluster objects (excluding recent/active clusters)
         """
-        all_memories = self.list_all(limit=10000)
+        # Filter memories if query provided
+        if query_filter:
+            all_memories = self.search(query_filter, limit=10000).memories
+        else:
+            all_memories = self.list_all(limit=10000)
         
         if not all_memories:
             return []
@@ -354,7 +426,8 @@ class MemoryManager:
         self,
         gap_minutes: int = 30,
         exclude_recent_minutes: int = 60,
-        min_cluster_size: int = 2
+        min_cluster_size: int = 2,
+        query_filter: str = ""
     ) -> list[MemoryRef]:
         """
         Find and summarize all closed temporal clusters.
@@ -367,7 +440,7 @@ class MemoryManager:
         Returns:
             List of MemoryRef for created summaries
         """
-        clusters = self.get_temporal_clusters(gap_minutes, exclude_recent_minutes)
+        clusters = self.get_temporal_clusters(gap_minutes, exclude_recent_minutes, query_filter=query_filter)
         
         summaries = []
         for cluster in clusters:
@@ -385,7 +458,9 @@ class MemoryManager:
         self,
         min_cluster_size: int = 3,
         max_gap_minutes: int = 60,
-        exclude_recent_minutes: int = 30
+        exclude_recent_minutes: int = 30,
+        exclude_summarized: bool = True,
+        query_filter: str = ""
     ) -> list[MemoryCluster]:
         """
         Adaptive clustering that shrinks gap until clusters meet min size.
@@ -398,6 +473,7 @@ class MemoryManager:
             min_cluster_size: Minimum memories in a cluster to be considered valid
             max_gap_minutes: Starting gap to try (shrinks by half each iteration)
             exclude_recent_minutes: How recent a cluster can be to be included
+            exclude_summarized: Skip clusters where all memories already have summaries
             
         Returns:
             List of MemoryCluster objects meeting the size threshold
@@ -408,7 +484,8 @@ class MemoryManager:
             clusters = self.get_temporal_clusters(
                 gap_minutes=gap,
                 exclude_recent_minutes=exclude_recent_minutes,
-                exclude_summarized=False  # Include all for clustering
+                exclude_summarized=exclude_summarized,
+                query_filter=query_filter
             )
             
             # Filter to only clusters meeting min size
@@ -426,7 +503,8 @@ class MemoryManager:
         self,
         min_cluster_size: int = 3,
         max_gap_minutes: int = 60,
-        exclude_recent_minutes: int = 30
+        exclude_recent_minutes: int = 30,
+        query_filter: str = ""
     ) -> list[MemoryRef]:
         """
         Find and summarize clusters using adaptive rolling gaps.
@@ -442,7 +520,8 @@ class MemoryManager:
         clusters = self.get_rolling_clusters(
             min_cluster_size=min_cluster_size,
             max_gap_minutes=max_gap_minutes,
-            exclude_recent_minutes=exclude_recent_minutes
+            exclude_recent_minutes=exclude_recent_minutes,
+            query_filter=query_filter
         )
         
         summaries = []
@@ -462,7 +541,8 @@ class MemoryManager:
         max_messages: int = 50,
         min_cluster_size: int = 3,
         max_gap_minutes: int = 60,
-        exclude_recent_minutes: int = 30
+        exclude_recent_minutes: int = 30,
+        query_filter: str = ""
     ) -> dict:
         """
         Examine database to determine if summarization is needed.
@@ -504,7 +584,8 @@ class MemoryManager:
         natural_clusters = self.get_temporal_clusters(
             gap_minutes=max_gap_minutes,
             exclude_recent_minutes=exclude_recent_minutes,
-            exclude_summarized=True
+            exclude_summarized=True,
+            query_filter=query_filter
         )
         
         # Filter to clusters meeting min size
@@ -521,10 +602,13 @@ class MemoryManager:
         # No valid clusters found - check if we need to force rollback
         if total_count >= max_messages:
             # Force rolling clustering to find smaller clusters
+            # Use exclude_summarized=True to avoid re-summarizing
             rolling_clusters = self.get_rolling_clusters(
                 min_cluster_size=2,  # Lower threshold for forced clustering
                 max_gap_minutes=max_gap_minutes,
-                exclude_recent_minutes=exclude_recent_minutes
+                exclude_recent_minutes=exclude_recent_minutes,
+                exclude_summarized=True,
+                query_filter=query_filter
             )
             
             if rolling_clusters:
@@ -544,7 +628,8 @@ class MemoryManager:
         max_messages: int = 50,
         min_cluster_size: int = 3,
         max_gap_minutes: int = 60,
-        exclude_recent_minutes: int = 30
+        exclude_recent_minutes: int = 30,
+        query_filter: str = ""
     ) -> list[MemoryRef]:
         """
         Check if summarization needed and perform it automatically.
@@ -562,7 +647,8 @@ class MemoryManager:
             max_messages=max_messages,
             min_cluster_size=min_cluster_size,
             max_gap_minutes=max_gap_minutes,
-            exclude_recent_minutes=exclude_recent_minutes
+            exclude_recent_minutes=exclude_recent_minutes,
+            query_filter=query_filter
         )
         
         if not check['needs_summarization']:

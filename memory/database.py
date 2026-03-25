@@ -222,6 +222,53 @@ class MemoryDB:
             conn.commit()
             
             return True
+    
+    def update_memory(self, memory_id: int, properties: dict = None, keywords: list = None) -> dict | None:
+        """Update a memory's properties and/or keywords.
+        
+        Args:
+            memory_id: The ID of the memory to update
+            properties: Dict of properties to update
+            keywords: List of keywords to set
+            
+        Returns:
+            Updated memory dict, or None if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            # Check if memory exists
+            memory = conn.execute(
+                "SELECT * FROM memories WHERE id = ?",
+                (memory_id,)
+            ).fetchone()
+            
+            if not memory:
+                return None
+            
+            # Update properties
+            if properties:
+                for key, value in properties.items():
+                    # Upsert property
+                    conn.execute(
+                        """INSERT OR REPLACE INTO memory_properties (memory_id, key, value) 
+                           VALUES (?, ?, ?)""",
+                        (memory_id, key, value)
+                    )
+            
+            # Update keywords
+            if keywords is not None:
+                # Remove existing keywords
+                conn.execute("DELETE FROM memory_keywords WHERE memory_id = ?", (memory_id,))
+                # Add new keywords
+                for kw in keywords:
+                    conn.execute(
+                        "INSERT INTO memory_keywords (memory_id, keyword) VALUES (?, ?)",
+                        (memory_id, kw)
+                    )
+            
+            conn.commit()
+            
+            # Return updated memory
+            return self.get_memory(memory_id)
 
 
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
