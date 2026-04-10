@@ -85,10 +85,10 @@ class DocumentManager:
             lines = lines[:max_lines]
             truncated = True
             display_count = max_lines
-        elif len(lines) > 200:
-            lines = lines[:200]
+        elif len(lines) > 1000:
+            lines = lines[:1000]
             truncated = True
-            display_count = 200
+            display_count = 1000
         
         # Calculate padding for line numbers
         num_digits = len(str(len(lines)))
