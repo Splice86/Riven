@@ -146,7 +146,8 @@ class Core:
                         if hasattr(part, 'content'):
                             logger.info(f"Think: {part.content}")
                         if hasattr(part, 'tool_name'):
-                            tool_result = node.tool_call_results.get(part.tool_name)
+                            tool_results = node.tool_call_results or {}
+                            tool_result = tool_results.get(part.tool_name)
                             result_str = str(tool_result) if tool_result else "Done"
                             logger.info(f"Tool {part.tool_name}({part.args}): {result_str}")
             
@@ -184,22 +185,20 @@ class Core:
             else:
                 history_parts.append(f"{role}: {content}")
         
-        history = "\n".join(history_parts)
-        return f"Conversation:\n{history}\n\nUser: {user_input}"
+        history = "\n\n".join(history_parts)
+        return f"{history}\n\nUser: {user_input}"
 
     async def run(self, prompt: str) -> Any:
         """Run the agent with the given prompt."""
-        # Add user message to memory
-        self._memory.add_context("user", prompt)
-        
-        # Build prompts
+        # Build prompts first (don't add to memory until success)
         system_prompt = self._build_system_prompt()
         full_prompt = self._build_prompt(prompt)
         
         # Run agent
         result = await self._run_with_retry(system_prompt, full_prompt)
         
-        # Add assistant response to memory
+        # Only add to memory after successful run
+        self._memory.add_context("user", prompt)
         self._memory.add_context("assistant", str(result.output))
         
         return result
