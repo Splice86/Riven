@@ -18,12 +18,21 @@ logger = logging.getLogger(__name__)
 
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", "http://127.0.0.1:8030")
 
+# LLM config - try config.py first, fallback to defaults
+try:
+    from config import LLM_URL, LLM_API_KEY, LLM_MODEL, DEFAULT_DB
+except ImportError:
+    LLM_URL = "http://127.0.0.1:8000/v1/"
+    LLM_API_KEY = "sk-dummy"
+    LLM_MODEL = "nvidia/MiniMax-M2.5-NVFP4"
+    DEFAULT_DB = "default"
+
 
 class MemoryClient:
     """Simple client for memory API context endpoints."""
     
     def __init__(self, db_name: str = "default", base_url: str = MEMORY_API_URL):
-        self.db_name = db_name
+        self.db_name = db_name or DEFAULT_DB
         self.base_url = base_url
     
     def add_context(self, role: str, content: str, created_at: str = None) -> dict:
@@ -51,17 +60,17 @@ class Core:
 
     def __init__(
         self,
-        model: str = "llama3",
+        model: str = None,
         system_prompt: str = None,
-        llm_url: str = "http://192.168.1.11:8010",
-        llm_api_key: str = "sk-dummy",
+        llm_url: str = None,
+        llm_api_key: str = None,
         max_retries: int = 3,
         retry_delay: float = 1.0,
-        db_name: str = "default"
+        db_name: str = None
     ):
-        self.model = model
-        self.llm_url = llm_url
-        self.llm_api_key = llm_api_key
+        self.model = model or LLM_MODEL
+        self.llm_url = llm_url or LLM_URL
+        self.llm_api_key = llm_api_key or LLM_API_KEY
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.db_name = db_name
@@ -76,7 +85,7 @@ class Core:
 
     def _create_agent(self, system_prompt: str) -> Agent:
         """Create a pydantic_ai Agent."""
-        client = AsyncOpenAI(base_url=f"{self.llm_url}/v1", api_key=self.llm_api_key)
+        client = AsyncOpenAI(base_url=self.llm_url, api_key=self.llm_api_key)
         provider = OpenAIProvider(openai_client=client)
         model = OpenAIChatModel(model_name=self.model, provider=provider)
         
@@ -200,11 +209,7 @@ async def main():
     """Interactive REPL for the agent."""
     system_prompt = """You are a helpful AI assistant."""
 
-    core = Core(
-        system_prompt=system_prompt,
-        model="llama3",
-        llm_url="http://192.168.1.11:8010",
-    )
+    core = Core()
     
     print("Riven agent ready. Type 'quit' or 'exit' to stop.\n")
     

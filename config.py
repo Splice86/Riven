@@ -9,9 +9,9 @@ config_local.py is gitignored.
 MEMORY_API_URL = "http://192.168.1.11:8030"
 
 # LLM API endpoint (for summarization)
-LLM_URL = "http://192.168.1.11:8010"
+LLM_URL = "http://127.0.0.1:8000/v1/"
 LLM_API_KEY = "sk-dummy"
-LLM_MODEL = "llama3"  # or your model name
+LLM_MODEL = "nvidia/MiniMax-M2.5-NVFP4"
 
 # Default database name
 DEFAULT_DB = "riven"
