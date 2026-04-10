@@ -237,7 +237,11 @@ class Core:
 
 async def main():
     """Interactive REPL for the agent."""
-    system_prompt = """You are a helpful AI assistant."""
+    system_prompt = """You are a helpful AI assistant.
+
+When reading files, use the open_document tool instead of shell commands like cat, less, or head. 
+The file open tool provides better formatting and line numbering. Only use shell commands for 
+executing programs or when you specifically need shell features (pipes, redirects, etc.)."""
 
     core = Core()
     
