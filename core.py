@@ -7,6 +7,12 @@ from typing import Any
 
 import requests
 from pydantic_ai import Agent
+from pydantic_ai.messages import (
+    AgentStreamEvent,
+    AgentRunResultEvent,
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+)
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.tools import Tool as PydanticTool
@@ -56,7 +62,7 @@ class MemoryClient:
 
 
 class Core:
-    """Simple agent using pydantic_ai with llama.cpp backend."""
+    """Simple agent using pydantic_ai with vllm backend."""
 
     def __init__(
         self,
@@ -100,22 +106,48 @@ class Core:
         )
 
     async def _run_with_retry(self, system_prompt: str, prompt: str) -> Any:
-        """Run a single iteration with retry logic using agent.iter()."""
+        """Run agent with streaming events for real-time tool output."""
         last_error = None
+        tool_results = []  # Track tool results for memory
         
         for attempt in range(self.max_retries):
             try:
                 agent = self._create_agent(system_prompt)
                 
-                # Use agent.iter() for structured node access
-                async with agent.iter(prompt) as agent_run:
-                    async for node in agent_run:
-                        self._process_node(node)
-                    
-                    # Get final result
-                    result = agent_run.result
-                    return result
-                    
+                # Use run_stream_events() for real-time tool output
+                async for event in agent.run_stream_events(prompt):
+                    if isinstance(event, FunctionToolCallEvent):
+                        # Tool is being called - show it immediately
+                        args = event.tool_call.args
+                        print(f"→ {event.tool_call.tool_name}{args}", flush=True)
+                        
+                    elif isinstance(event, FunctionToolResultEvent):
+                        # Tool returned - show result immediately
+                        content = event.result.content
+                        tool_name = event.result.tool_name
+                        
+                        # Handle both string and non-string content
+                        if hasattr(content, 'content'):
+                            content = content.content
+                        content_str = str(content) if content else ""
+                        
+                        print(f"← {tool_name}: {content_str}", flush=True)
+                        
+                        # Store for memory
+                        tool_results.append({
+                            "tool": tool_name,
+                            "result": content_str
+                        })
+                        
+                    elif isinstance(event, AgentRunResultEvent):
+                        # Final result - store tool results in memory
+                        for tr in tool_results:
+                            self._memory.add_context(
+                                "tool",
+                                f"{tr['tool']}: {tr['result']}"
+                            )
+                        return event.result
+                        
             except Exception as e:
                 last_error = e
                 
@@ -125,35 +157,6 @@ class Core:
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
         
         raise last_error
-
-    def _process_node(self, node) -> None:
-        """Process a single node from agent.iter()."""
-        node_name = type(node).__name__
-        
-        match node_name:
-            case 'CallToolsNode':
-                response = node.model_response
-                if response and response.parts:
-                    for part in response.parts:
-                        if hasattr(part, 'tool_name'):
-                            print(f"DEBUG: Found tool call: {part.tool_name}", flush=True)
-                            print(f"DEBUG: tool_call_results: {node.tool_call_results}", flush=True)
-                            
-                            tool_results = node.tool_call_results or {}
-                            tool_result = tool_results.get(part.tool_name)
-                            result_str = str(tool_result) if tool_result else ""
-                            
-                            print(f"DEBUG: result_str: {result_str[:100]}..." if len(result_str) > 100 else f"DEBUG: result_str: {result_str}", flush=True)
-                            
-                            # Log full result to memory with tool name and args
-                            args_str = str(part.args) if part.args else "{}"
-                            try:
-                                self._memory.add_context("tool", f"{part.tool_name} {args_str}: {result_str}")
-                            except Exception as e:
-                                print(f"DEBUG: Memory error: {e}", flush=True)
-                            
-                            # Show to user
-                            print(f"→ {part.tool_name}{args_str}: {result_str}", flush=True)
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with module context."""
@@ -180,10 +183,10 @@ class Core:
         system_prompt = self._build_system_prompt()
         full_prompt = self._build_prompt(prompt)
         
-        # Run agent
+        # Run agent (tool results already streamed and stored in memory)
         result = await self._run_with_retry(system_prompt, full_prompt)
         
-        # Only add to memory after successful run
+        # Add user/assistant to memory after successful run
         self._memory.add_context("user", prompt)
         self._memory.add_context("assistant", str(result.output))
         
