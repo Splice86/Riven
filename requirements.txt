@@ -1,0 +1,4 @@
+# Riven agent dependencies
+pydantic-ai>=1.0.0
+httpx
+requests
