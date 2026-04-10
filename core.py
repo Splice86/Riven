@@ -142,10 +142,13 @@ class Core:
                             
                             # Log full result to memory with tool name and args
                             args_str = str(part.args) if part.args else "{}"
-                            self._memory.add_context("tool", f"{part.tool_name} {args_str}: {result_str}")
+                            try:
+                                self._memory.add_context("tool", f"{part.tool_name} {args_str}: {result_str}")
+                            except Exception as e:
+                                logger.warning(f"Failed to log tool to memory: {e}")
                             
-                            # Show to user
-                            logger.info(f"→ {part.tool_name}{args_str}: {result_str}")
+                            # Show to user (flush immediately)
+                            print(f"→ {part.tool_name}{args_str}: {result_str}", flush=True)
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with module context."""
