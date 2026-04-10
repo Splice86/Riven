@@ -131,28 +131,15 @@ class Core:
         node_name = type(node).__name__
         
         match node_name:
-            case 'UserPromptNode':
-                logger.info(f"User: {node.user_prompt}")
-            
-            case 'ModelRequestNode':
-                if node.request and node.request.parts:
-                    content = node.request.parts[0].content
-                    logger.info(f"LLM: {content}")
-            
             case 'CallToolsNode':
                 response = node.model_response
                 if response and response.parts:
                     for part in response.parts:
-                        if hasattr(part, 'content'):
-                            logger.info(f"Think: {part.content}")
                         if hasattr(part, 'tool_name'):
                             tool_results = node.tool_call_results or {}
                             tool_result = tool_results.get(part.tool_name)
                             result_str = str(tool_result) if tool_result else "Done"
-                            logger.info(f"Tool {part.tool_name}({part.args}): {result_str}")
-            
-            case 'End':
-                logger.info(f"Done: {node.data.output}")
+                            logger.info(f"→ {part.tool_name}: {result_str}")
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with module context."""
@@ -167,26 +154,11 @@ class Core:
         return prompt
 
     def _build_prompt(self, user_input: str) -> str:
-        """Build full prompt with conversation context."""
-        # Get context from memory API
-        context_messages = self._memory.get_context(limit=50)
+        """Build prompt. Currently just returns user input.
         
-        if not context_messages:
-            return user_input
-        
-        # Build conversation history
-        history_parts = []
-        for msg in context_messages:
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            
-            if role == "summary":
-                history_parts.append(f"Previous: {content}")
-            else:
-                history_parts.append(f"{role}: {content}")
-        
-        history = "\n\n".join(history_parts)
-        return f"{history}\n\nUser: {user_input}"
+        Context handling is done via memory API separately.
+        """
+        return user_input
 
     async def run(self, prompt: str) -> Any:
         """Run the agent with the given prompt."""
