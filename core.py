@@ -28,14 +28,15 @@ logger = logging.getLogger(__name__)
 
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", "http://127.0.0.1:8030")
 
-# LLM config - try config.py first, fallback to defaults
+# Config - try config.py first, fallback to defaults
 try:
-    from config import LLM_URL, LLM_API_KEY, LLM_MODEL, DEFAULT_DB
+    from config import LLM_URL, LLM_API_KEY, LLM_MODEL, DEFAULT_DB, MAX_OUTPUT_LINES
 except ImportError:
     LLM_URL = "http://127.0.0.1:8000/v1/"
     LLM_API_KEY = "sk-dummy"
     LLM_MODEL = "nvidia/MiniMax-M2.5-NVFP4"
     DEFAULT_DB = "default"
+    MAX_OUTPUT_LINES = 1000
 
 
 class MemoryClient:
@@ -144,10 +145,10 @@ class Core:
                             print(f"→ {pending_tool['name']}{pending_tool['args']}", flush=True)
                             pending_tool = None
                         
-                        # Truncate to 200 lines for safety
+                        # Truncate to configured max lines
                         lines = content_str.split('\n')
-                        if len(lines) > 200:
-                            lines = lines[:200] + [f"... (truncated {len(lines) - 200} lines)"]
+                        if len(lines) > MAX_OUTPUT_LINES:
+                            lines = lines[:MAX_OUTPUT_LINES] + [f"... (truncated {len(lines) - MAX_OUTPUT_LINES} lines)"]
                         
                         # Indent the result
                         for line in lines:
