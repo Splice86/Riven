@@ -136,18 +136,23 @@ class Core:
                 if response and response.parts:
                     for part in response.parts:
                         if hasattr(part, 'tool_name'):
+                            print(f"DEBUG: Found tool call: {part.tool_name}", flush=True)
+                            print(f"DEBUG: tool_call_results: {node.tool_call_results}", flush=True)
+                            
                             tool_results = node.tool_call_results or {}
                             tool_result = tool_results.get(part.tool_name)
                             result_str = str(tool_result) if tool_result else ""
+                            
+                            print(f"DEBUG: result_str: {result_str[:100]}..." if len(result_str) > 100 else f"DEBUG: result_str: {result_str}", flush=True)
                             
                             # Log full result to memory with tool name and args
                             args_str = str(part.args) if part.args else "{}"
                             try:
                                 self._memory.add_context("tool", f"{part.tool_name} {args_str}: {result_str}")
                             except Exception as e:
-                                logger.warning(f"Failed to log tool to memory: {e}")
+                                print(f"DEBUG: Memory error: {e}", flush=True)
                             
-                            # Show to user (flush immediately)
+                            # Show to user
                             print(f"→ {part.tool_name}{args_str}: {result_str}", flush=True)
 
     def _build_system_prompt(self) -> str:
