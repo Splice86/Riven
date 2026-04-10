@@ -140,11 +140,11 @@ class Core:
                             tool_result = tool_results.get(part.tool_name)
                             result_str = str(tool_result) if tool_result else "Done"
                             
-                            # Log full result to memory
-                            self._memory.add_context("tool", f"{part.tool_name}: {result_str}")
+                            # Log full result to memory with tool name and args
+                            args_str = str(part.args) if part.args else "{}"
+                            self._memory.add_context("tool", f"{part.tool_name} {args_str}: {result_str}")
                             
                             # Show command + truncated result to user
-                            args_str = str(part.args) if part.args else ""
                             if len(result_str) > 500:
                                 display_str = result_str[:500] + f"\n... ({len(result_str) - 500} more chars)"
                             else:
