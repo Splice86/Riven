@@ -586,8 +586,6 @@ close_file("main.py")
         enrollment=lambda: None,
         functions={
             "open_file": open_file,
-            # "get_lines": get_lines,  # Disabled - use {file} context instead
-            "replace_lines": replace_lines,
             "insert_lines": insert_lines,
             "remove_lines": remove_lines,
             "replace_text": replace_text,
