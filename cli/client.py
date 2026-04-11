@@ -63,33 +63,38 @@ class RivenClient:
         return resp.json()
     
     def stream_message(self, message: str) -> str:
-        """Send message and stream response token by token."""
+        """Send message and stream response token by token using SSE."""
         if not self.session_id:
             raise ValueError("No session - call create_session first")
         
         import json
+        output = ""
         with requests.post(
             f"{self.base_url}/api/v1/sessions/{self.session_id}/messages",
             json={"message": message, "stream": True},
-            stream=True
+            stream=True,
+            timeout=60
         ) as resp:
             resp.raise_for_status()
-            output = ""
             for line in resp.iter_lines():
                 if line:
-                    data = line.decode('utf-8')
-                    if data.startswith('data: '):
+                    line = line.decode('utf-8')
+                    if line.startswith('data: '):
                         try:
-                            token_data = json.loads(data[6:])
-                            token = token_data.get('token', '')
-                            print(token, end=' ', flush=True)
-                            output += token + " "
-                            if token_data.get('done'):
+                            data = json.loads(line[6:])
+                            if 'error' in data:
+                                print(f"\nError: {data['error']}")
                                 break
-                        except:
+                            token = data.get('token', '')
+                            if token:
+                                print(token, end=' ', flush=True)
+                                output += token + ' '
+                            if data.get('done'):
+                                break
+                        except json.JSONDecodeError:
                             pass
-            print()  # newline after stream
-            return output
+        print()  # newline after stream
+        return output.strip()
     
     def poll_messages(self) -> List[str]:
         """Poll for messages from the session."""

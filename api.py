@@ -84,6 +84,7 @@ async def send_message(session_id: str, req: MessageSend):
     # If queued (threaded mode), wait for response
     if result.get("queued"):
         import time
+        output = ""
         for _ in range(60):  # max 60 seconds
             time.sleep(0.5)
             messages = manager.receive(session_id)
@@ -93,8 +94,18 @@ async def send_message(session_id: str, req: MessageSend):
         else:
             output = "Timeout waiting for response"
     else:
-        # Simple mode - already have output
         output = result.get("output", "")
+    
+    # Stream response as SSE
+    if req.stream:
+        async def generate():
+            # Stream word by word
+            words = output.split()
+            for i, word in enumerate(words):
+                yield f"data: {json.dumps({'token': word})}\n\n"
+                await asyncio.sleep(0.01)
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        return StreamingResponse(generate(), media_type="text/event-stream")
     
     return {"output": output}
 

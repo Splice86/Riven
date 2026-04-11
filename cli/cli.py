@@ -91,13 +91,11 @@ def main():
                 print(f"✓ Session cleared. New session: {session[:8]}")
                 continue
             
-            # Send message
-            result = client.send_message(user_input)
-            
-            if result.get("output"):
-                print(f"\n{result['output']}\n")
-            elif result.get("error"):
-                print(f"\n{RED}Error: {result['error']}{RESET}\n")
+            # Send message with streaming
+            try:
+                client.stream_message(user_input)
+            except Exception as e:
+                print(f"\n{RED}Error: {e}{RESET}\n")
     
     except KeyboardInterrupt:
         print("\n^C Interrupted")
