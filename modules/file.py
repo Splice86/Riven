@@ -150,7 +150,7 @@ class DocumentManager:
                 if new_lines and not new_lines[-1].endswith('\n'):
                     new_lines[-1] += '\n'
                 doc.lines[start:end] = new_lines
-                found = True
+                doc.content = ''.join(doc.lines)
                 self.save(abs_path)
                 return f"Replaced lines {start+1}-{end} (fuzzy match {score:.0%})"
             else:
