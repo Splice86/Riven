@@ -64,7 +64,8 @@ class MemoryDB:
         keywords: list[str] | None = None,
         properties: dict[str, str] | None = None,
         embedding: np.ndarray | None = None,
-        created_at: str | None = None
+        created_at: str | None = None,
+        session_id: str | None = None
     ) -> int:
         """Add a memory with optional keywords and properties.
         
@@ -74,6 +75,7 @@ class MemoryDB:
             properties: Optional key-value pairs (e.g., {"role": "user"})
             embedding: Optional pre-computed embedding (generated from content if not provided)
             created_at: Optional ISO timestamp (e.g., "2025-01-01T10:00:00+00:00")
+            session_id: Optional session ID to group memories (e.g., for conversation sessions)
             
         Returns:
             The ID of the inserted memory
@@ -91,9 +93,9 @@ class MemoryDB:
         with sqlite3.connect(self.db_path) as conn:
             # Insert memory
             cursor = conn.execute(
-                """INSERT INTO memories (content, embedding, created_at, last_updated, token_count)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (content, embedding.tobytes(), created_at, created_at, token_count)
+                """INSERT INTO memories (content, embedding, created_at, last_updated, token_count, session_id)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (content, embedding.tobytes(), created_at, created_at, token_count, session_id)
             )
             memory_id = cursor.lastrowid
             
@@ -314,7 +316,8 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
                 created_at TEXT NOT NULL,
                 last_updated TEXT NOT NULL,
                 last_accessed TEXT,
-                token_count INTEGER DEFAULT 0
+                token_count INTEGER DEFAULT 0,
+                session_id TEXT
             )
         """)
         

@@ -148,7 +148,7 @@ class Context:
         self.max_tokens = max_tokens
         self.min_cluster_size = min_cluster_size
     
-    def add(self, role: str, text: str, created_at: str = None) -> dict:
+    def add(self, role: str, text: str, created_at: str = None, session_id: str = None) -> dict:
         """
         Add a context message.
         
@@ -158,6 +158,7 @@ class Context:
             role: Message role (user, assistant, system, tool)
             text: Message content
             created_at: Optional timestamp (ISO format)
+            session_id: Optional session ID to group memories
             
         Returns:
             Dict with id, role, token_count, created_at, and summarization result
@@ -178,11 +179,12 @@ class Context:
                 "node_type": "context",
                 "token_count": str(token_count)
             },
-            created_at=created_at
+            created_at=created_at,
+            session_id=session_id
         )
         
         # Check if summarization is needed
-        summary_result = self._maybe_summarize()
+        summary_result = self._maybe_summarize(session_id)
         
         return {
             "id": memory_id,
@@ -194,18 +196,22 @@ class Context:
             "memories_summarized": summary_result.get("memories_summarized", 0)
         }
     
-    def get(self, limit: int = 100) -> list[dict]:
+    def get(self, limit: int = 100, session_id: str = None) -> list[dict]:
         """
         Get context for LLM: summary first, then unsummarized turns.
         
+        Args:
+            limit: Maximum number of unsummarized turns to return
+            session_id: Optional session ID to filter by
+            
         Returns:
             List of memory dicts with id, role, content, created_at
         """
-        # Get last summary
-        summary = self._get_last_summary()
+        # Get last summary (filtered by session_id if provided)
+        summary = self._get_last_summary(session_id)
         
-        # Get unsummarized
-        unsummarized = self._get_unsummarized(limit)
+        # Get unsummarized (filtered by session_id if provided)
+        unsummarized = self._get_unsummarized(limit, session_id)
         
         # Build context: summary first, then unsummarized
         context = []
@@ -228,9 +234,14 @@ class Context:
         
         return context
     
-    def get_token_count(self) -> int:
+    def get_token_count(self, session_id: str = None) -> int:
         """Get total tokens in unsummarized context."""
-        results = self.db.search("k:context", limit=10000)
+        # Build query with session_id filter if provided
+        query_parts = ["k:context"]
+        if session_id:
+            query_parts.append(f"session_id:{session_id}")
+        query = " AND ".join(query_parts)
+        results = self.db.search(query, limit=10000)
         
         total = 0
         for mem in results:
@@ -246,9 +257,14 @@ class Context:
         
         return total
     
-    def _maybe_summarize(self) -> dict:
+    def _maybe_summarize(self, session_id: str = None) -> dict:
         """Check token count and summarize if needed."""
-        results = self.db.search("k:context", limit=10000)
+        # Build query with session_id filter if provided
+        query_parts = ["k:context"]
+        if session_id:
+            query_parts.append(f"session_id:{session_id}")
+        query = " AND ".join(query_parts)
+        results = self.db.search(query, limit=10000)
         
         unsummarized = []
         for mem in results:
@@ -277,9 +293,9 @@ class Context:
         if total_tokens <= self.max_tokens:
             return {"summarized": False}
         
-        return self._summarize(unsummarized)
+        return self._summarize(unsummarized, session_id)
     
-    def _summarize(self, memories: list[dict]) -> dict:
+    def _summarize(self, memories: list[dict], session_id: str = None) -> dict:
         """Summarize the given memories."""
         if not memories:
             return {"summarized": False}
@@ -291,6 +307,10 @@ class Context:
         total_tokens = sum(m["token_count"] for m in memories)
         created_at = datetime.now(timezone.utc).isoformat()
         
+        # Get session_id from first memory if not provided
+        if not session_id:
+            session_id = memories[0].get("session_id")
+        
         summary_id = self.db.add_memory(
             content=summary_text,
             keywords=["context", "summary"],
@@ -299,7 +319,8 @@ class Context:
                 "summarized_count": str(len(memories)),
                 "summarized_tokens": str(total_tokens)
             },
-            created_at=created_at
+            created_at=created_at,
+            session_id=session_id
         )
         
         for memory in memories:
@@ -315,9 +336,14 @@ class Context:
             "memories_summarized": len(memories)
         }
     
-    def _get_last_summary(self) -> Optional[dict]:
+    def _get_last_summary(self, session_id: str = None) -> Optional[dict]:
         """Get the most recent summary memory."""
-        results = self.db.search("k:summary", limit=10)
+        # Build query with session_id filter if provided
+        query_parts = ["k:summary"]
+        if session_id:
+            query_parts.append(f"session_id:{session_id}")
+        query = " AND ".join(query_parts)
+        results = self.db.search(query, limit=10)
         
         if not results:
             return None
@@ -326,9 +352,14 @@ class Context:
         results.sort(key=lambda m: m.get("created_at", ""), reverse=True)
         return results[0]
     
-    def _get_unsummarized(self, limit: int) -> list[dict]:
+    def _get_unsummarized(self, limit: int, session_id: str = None) -> list[dict]:
         """Get unsummarized context memories."""
-        results = self.db.search("k:context", limit=10000)
+        # Build query with session_id filter if provided
+        query_parts = ["k:context"]
+        if session_id:
+            query_parts.append(f"session_id:{session_id}")
+        query = " AND ".join(query_parts)
+        results = self.db.search(query, limit=10000)
         
         unsummarized = []
         for mem in results:
