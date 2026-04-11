@@ -125,8 +125,8 @@ async def run_repl(core_name: str) -> None:
                 session_id = core.clear_session()
                 print(f"✓ Session cleared. New session: {session_id}")
                 _processing = False
-                print(f"{get_session_line(session_id)}")
-                print(f"{prompt_prefix} > ", end="")
+                session_line = get_session_line(session_id)
+                prompt = input(f"{session_line}\n{prompt_prefix} > ").strip()
                 continue
             
             # Result is already streamed to terminal
