@@ -105,96 +105,6 @@ class DocumentManager:
         
         return f"Opened {os.path.basename(abs_path)} ({len(doc.lines)} lines). File content is now in system prompt."
     
-    def get_lines(self, path: str, start: int = 1, end: Optional[int] = None) -> str:
-        """Get a specific range of lines from an open document."""
-        abs_path = os.path.abspath(path)
-        
-        if abs_path not in self._documents:
-            return f"Error: {path} not open. Use open_file first."
-        
-        doc = self._documents[abs_path]
-        
-        if start < 1:
-            start = 1
-        if end is None or end > len(doc.lines):
-            end = len(doc.lines)
-        
-        if start > end:
-            return f"Error: start line {start} > end line {end}"
-        
-        # Get lines (0-indexed in list, but user uses 1-indexed)
-        selected = doc.lines[start-1:end]
-        
-        num_digits = len(str(len(selected)))
-        fmt = f"{{:{num_digits}}} │ {{}}"
-        
-        output_lines = [f"Lines {start}-{end} from {os.path.basename(path)}"]
-        for i, line in enumerate(selected, start):
-            output_lines.append(fmt.format(i, line.rstrip('\n')))
-        
-        return "\n".join(output_lines)
-    
-    def insert_lines(self, path: str, after_line: int, new_content: str) -> str:
-        """Insert new content after a specific line.
-        
-        Note: You must provide correct indentation in new_content. The function
-        does not adjust indentation automatically - match the surrounding
-        code's indentation (e.g., 4 spaces for Python).
-        
-        Args:
-            path: Path to the file.
-            after_line: Insert after this line number.
-            new_content: Content to insert.
-        """
-        abs_path = os.path.abspath(path)
-        
-        if abs_path not in self._documents:
-            return f"Error: {path} not open. Use open_file first."
-        
-        doc = self._documents[abs_path]
-        
-        if after_line < 0 or after_line > len(doc.lines):
-            return f"Error: invalid after_line {after_line}"
-        
-        new_lines = new_content.splitlines(keepends=True)
-        if new_lines and not new_lines[-1].endswith('\n'):
-            new_lines[-1] += '\n'
-        
-        doc.lines[after_line:after_line] = new_lines
-        doc.content = ''.join(doc.lines)
-        self.save(abs_path)
-        
-        return f"Inserted {len(new_lines)} lines after line {after_line}"
-    
-    def remove_lines(self, path: str, start: int, end: int) -> str:
-        """Remove a range of lines.
-        
-        Note: This removes entire lines only.
-        
-        Args:
-            path: Path to the file.
-            start: Start line number (1-indexed).
-            end: End line number (inclusive).
-        """
-        abs_path = os.path.abspath(path)
-        
-        if abs_path not in self._documents:
-            return f"Error: {path} not open. Use open_file first."
-        
-        doc = self._documents[abs_path]
-        
-        if start < 1:
-            start = 1
-        if end > len(doc.lines):
-            end = len(doc.lines)
-        
-        num_removed = end - start + 1
-        del doc.lines[start-1:end]
-        doc.content = ''.join(doc.lines)
-        self.save(abs_path)
-        
-        return f"Removed lines {start}-{end} from {os.path.basename(path)} ({num_removed} lines)"
-    
     def replace_text(
         self,
         path: str,
@@ -290,16 +200,6 @@ class DocumentManager:
         return list(self._documents.keys())
 
 
-# Global config
-_show_line_numbers = True
-
-
-def set_config(show_line_numbers: bool = True) -> None:
-    """Configure the file module."""
-    global _show_line_numbers
-    _show_line_numbers = show_line_numbers
-
-
 def get_module():
     """Get the file module."""
     manager = DocumentManager()
@@ -316,45 +216,6 @@ def get_module():
             Confirmation message
         """
         return manager.open(path)
-    
-    async def get_lines(path: str, start: int = 1, end: Optional[int] = None) -> str:
-        """Get a specific range of lines from an open file.
-        
-        Args:
-            path: Path to the file.
-            start: Start line number (1-indexed).
-            end: End line number (inclusive, None for all remaining).
-            
-        Returns:
-            Selected lines with numbers
-        """
-        return manager.get_lines(path, start, end)
-    
-    async def insert_lines(path: str, after_line: int, new_content: str) -> str:
-        """Insert new content after a specific line.
-        
-        Args:
-            path: Path to the file.
-            after_line: Insert after this line number.
-            new_content: Content to insert.
-            
-        Returns:
-            Confirmation message
-        """
-        return manager.insert_lines(path, after_line, new_content)
-    
-    async def remove_lines(path: str, start: int, end: int) -> str:
-        """Remove a range of lines.
-        
-        Args:
-            path: Path to the file.
-            start: Start line number (1-indexed).
-            end: End line number (inclusive).
-            
-        Returns:
-            Confirmation message
-        """
-        return manager.remove_lines(path, start, end)
     
     async def replace_text(path: str, old_text: str, new_text: str) -> str:
         """Replace text anywhere in file using fuzzy matching.
@@ -379,23 +240,6 @@ def get_module():
             Status message
         """
         return manager.close(path)
-    
-    async def list_open_files() -> str:
-        """List all currently open files.
-        
-        Returns:
-            Formatted list of open files
-        """
-        open_files = manager.list_open()
-        if not open_files:
-            return "No files open"
-        
-        lines = ["Open files:"]
-        for path in open_files:
-            doc = manager._documents[path]
-            lines.append(f"  - {os.path.basename(path)} ({len(doc.lines)} lines)")
-        
-        return "\n".join(lines)
     
     def get_file_context() -> str:
         """Return info about currently open files with their content."""
@@ -446,13 +290,8 @@ close_file("main.py")
         lines = [instructions, "", "Currently open files with content:"]
         for path in sorted_files:
             doc = manager._documents[path]
-            lines.append(f"\n=== {os.path.basename(path)} ({len(doc.lines)} lines) ===")
-            # Add line numbers if configured
-            if _show_line_numbers:
-                for i, line in enumerate(doc.lines, 1):
-                    lines.append(f"{i:4d}  {line.rstrip()}")
-            else:
-                lines.append(''.join(doc.lines))
+            lines.append(f"\n=== {os.path.basename(path)} ===")
+            lines.append(''.join(doc.lines))
         return "\n".join(lines)
     
     return Module(
@@ -460,11 +299,8 @@ close_file("main.py")
         enrollment=lambda: None,
         functions={
             "open_file": open_file,
-            "insert_lines": insert_lines,
-            "remove_lines": remove_lines,
             "replace_text": replace_text,
             "close_file": close_file,
-            "list_open_files": list_open_files,
         },
         get_context=get_file_context,
         tag="file"

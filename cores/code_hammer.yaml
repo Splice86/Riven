@@ -39,4 +39,3 @@ memory_db: "codehammer"
 tool_timeout: 60
 strip_thinking: true
 store_tool_results: 300  # 0=skip, N=store last N lines (truncates long output)
-show_line_numbers: true  # Include line numbers for open files in system prompt

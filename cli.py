@@ -56,7 +56,7 @@ def print_banner() -> None:
                 print(f"{gradient_colors[color_idx]}{line}{RESET}")
         
         # Code Hammer subtitle - line above tagline (no blank line after banner)
-        print(f"{' ' * 32}{RED}CODE HAMMER{RESET}")
+        print(f"{' ' * 30}{RED}CODEHAMMER{RESET}")
         print()  # Blank line between CODE HAMMER and tagline
         
         # Tagline
