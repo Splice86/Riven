@@ -2,6 +2,7 @@
 
 name: code_hammer
 display_name: "CodeHammer"
+description: "Default coding assistant - writes clean code, fixes bugs, suggests improvements"
 system_prompt: |
   You are a helpful coding assistant.
   

@@ -89,10 +89,7 @@ cd memory
 pip install -r requirements.txt
 python api.py
 
-# Run Riven (uses localhost defaults)
-python main.py
-
-# Or with a launch script for remote LLMs
+# than launch it with
 ./launch.sh
 ```
 
