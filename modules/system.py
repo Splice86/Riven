@@ -109,12 +109,16 @@ def get_module():
         # System prompt from core
         lines.append("\n### SYSTEM PROMPT ###")
         try:
-            from core import get_system_prompt
-            prompt = get_system_prompt()
-            if prompt:
-                lines.append(prompt)
+            # Late import to avoid circular imports
+            import core as core_module
+            if hasattr(core_module, '_current_system_prompt'):
+                prompt = core_module._current_system_prompt
+                if prompt:
+                    lines.append(prompt)
+                else:
+                    lines.append("(no prompt built yet - run a query first)")
             else:
-                lines.append("(no prompt built yet - run a query first)")
+                lines.append("(core not fully initialized)")
         except Exception as e:
             lines.append(f"Error getting system prompt: {e}")
         
