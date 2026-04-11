@@ -14,9 +14,37 @@ def get_prompt_prefix(core_name: str) -> str:
     return f"\033[96mRiven - {core_name}\033[0m"
 
 
+def print_banner() -> None:
+    """Print edgy cyberpunk ASCII art banner."""
+    # ANSI colors: red -> magenta -> purple
+    RED = "\033[91m"
+    MAGENTA = "\033[95m"
+    PURPLE = "\033[35m"
+    CYAN = "\033[96m"
+    RESET = "\033[0m"
+    
+    banner = f"""
+{RED}      ███████{MAGENTA}╗{RED}  █████{MAGENTA}╗ {RED} ██████{MAGENTA}╗███████{MAGENTA}╗{RED}██████{MAGENTA}╗ {RED}██████{MAGENTA}╗  ██████{MAGENTA}╗ {RED}██████{MAGENTA}╗ {RED}███████{MAGENTA}╗{RED}██████{MAGENTA}╗{RESET}
+{MAGENTA}     ██{RED}╔══{MAGENTA}╝{RED}╚══{MAGENTA}╝{RED}██{MAGENTA}╔═══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔═══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RESET}
+{MAGENTA}     ██{RED}║{MAGENTA}║{RED}     █████{RED}██{MAGENTA}╗{RED}██████{MAGENTA}╗{RED}█████{MAGENTA}╗ {RED}██{MAGENTA}║   ██{MAGENTA}║{RED}█████{MAGENTA}╗ {RED}██████{MAGENTA}╗{RED}██████{MAGENTA}╗{RED}██████{MAGENTA}╗{RESET}
+{MAGENTA}     ██{RED}║{MAGENTA}║{RED}     ██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}║   ██{MAGENTA}║{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RESET}
+{MAGENTA}╗{RED}╗███████{MAGENTA}╗{RED}██{MAGENTA}║{RED} ╚{MAGENTA}╗{RED}██{MAGENTA}╔╝{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}╚██████{MAGENTA}╔╝{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RESET}
+{MAGENTA}╚══════╝{RED}╚═╝{MAGENTA} ╚═╝{RED} ╚═╝  ╚═╝{MAGENTA}╚═╝  ╚═╝{RED}╚═════╝ {MAGENTA}╚═╝  ╚═╝{RED}╚═════╝ {MAGENTA}╚═╝  ╚═╝{RED}╚═╝  ╚═╝{RED}╚═╝  ╚═╝{RESET}
+{PURPLE}        ██████╗ ██████╗ ███████╗██╗   ██╗███████╗████████╗███████╗███╗   ███╗{RESET}
+{PURPLE}        ██╔══██╗██╔══██╗██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔════╝████╗ ████║{RESET}
+{PURPLE}        ██████╔╝██████╔╝█████╗  ██║   ██║███████╗   ██║   █████╗  ██╔████╔██║{RESET}
+{PURPLE}        ██╔══██╗██╔══██╗██╔══╝  ╚██╗ ██╔╝╚════██║   ██║   ██╔══╝  ██║╚██╔╝██║{RESET}
+{PURPLE}        ██║  ██║██║  ██║███████╗ ╚████╔╝ ███████║   ██║   ███████╗ ██║ ╚═╝ ██║{RESET}
+{CYAN}        ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝   ╚═╝   ╚══════╝ ╚═╝     ╚═╝{RESET}
+"""
+    print(banner)
+
+
 async def run_repl(core_name: str) -> None:
     """Run the interactive REPL."""
     global _processing
+    
+    print_banner()
     
     core = get_core(core_name)
     prompt_prefix = get_prompt_prefix(core_name)
