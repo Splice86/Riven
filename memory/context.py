@@ -310,7 +310,9 @@ class Context:
                 total_tokens += int(m.get("properties", {}).get("token_count", "0"))
             except (ValueError, TypeError):
                 pass
-        created_at = datetime.now(timezone.utc).isoformat()
+        
+        # Use the most recent timestamp from the memories being summarized
+        created_at = max(m["created_at"] for m in memories)
         
         # Get session from first memory's properties if not provided
         if not session:
