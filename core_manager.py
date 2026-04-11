@@ -1,19 +1,102 @@
-"""Core Manager - manages core instances and switching between them."""
+"""Core Manager - manages core instances with threaded I/O channels."""
 
 import os
 import glob
 import yaml
 import uuid
-from typing import Optional, List, Dict
+import threading
+import queue
+from typing import Optional, List, Dict, Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 
 
-class CoreManager:
-    """Manages core instances and switching between them."""
+# ============== CHANNELS ==============
+
+class Channel:
+    """Message channel with emit pattern for callbacks."""
     
     def __init__(self):
-        self._cores: dict[str, dict] = {}  # name -> config
-        self._current: Optional[str] = None
-        self._instances: dict[str, dict] = {}  # instance_id -> instance data
+        self._callbacks: List[Callable] = []
+    
+    def emit(self, callback: Callable) -> None:
+        """Register a callback to fire when messages are sent."""
+        self._callbacks.append(callback)
+    
+    def _fire(self, message) -> None:
+        """Fire all callbacks with the message."""
+        for cb in self._callbacks:
+            try:
+                cb(message)
+            except Exception as e:
+                print(f"Channel callback error: {e}")
+
+
+class InputChannel(Channel):
+    """Channel for sending messages INTO a core."""
+    
+    def __init__(self):
+        super().__init__()
+        self._queue: queue.Queue = queue.Queue()
+    
+    def send(self, message: str) -> None:
+        """Queue a message to be processed by the core."""
+        self._queue.put(message)
+        self._fire(message)
+    
+    def get(self, timeout: float = None) -> str:
+        """Get next message from queue."""
+        return self._queue.get(timeout=timeout)
+    
+    def empty(self) -> bool:
+        return self._queue.empty()
+
+
+class OutputChannel(Channel):
+    """Channel for receiving messages FROM a core."""
+    
+    def __init__(self):
+        super().__init__()
+        self._queue: queue.Queue = queue.Queue()
+    
+    def send(self, message: str) -> None:
+        """Push a message to output (for external producers)."""
+        self._queue.put(message)
+        self._fire(message)
+    
+    def get(self, timeout: float = None) -> str:
+        """Get next message from queue."""
+        return self._queue.get(timeout=timeout)
+    
+    def empty(self) -> bool:
+        return self._queue.empty()
+
+
+# ============== CORE INSTANCE ==============
+
+@dataclass
+class CoreInstance:
+    """A running core instance with I/O channels."""
+    id: str
+    session_id: str
+    core_name: str
+    thread: Optional[threading.Thread] = None
+    input_channel: InputChannel = field(default_factory=InputChannel)
+    output_channel: OutputChannel = field(default_factory=OutputChannel)
+    started_at: datetime = field(default_factory=datetime.now)
+    status: str = "starting"  # starting, running, stopping, stopped
+
+
+# ============== CORE MANAGER ==============
+
+class CoreManager:
+    """Manages core instances with threading and channels."""
+    
+    def __init__(self):
+        self._cores: Dict[str, Dict] = {}  # name -> config
+        self._instances: Dict[str, CoreInstance] = {}  # session_id -> instance
+        self._current_session: Optional[str] = None
+        self._lock = threading.Lock()
         self._load_cores()
     
     def _load_cores(self) -> None:
@@ -34,11 +117,7 @@ class CoreManager:
                     self._cores[name] = config
     
     def list(self) -> List[Dict]:
-        """List available cores.
-        
-        Returns:
-            List of dicts with 'name', 'display_name', 'description'
-        """
+        """List available cores."""
         return [
             {
                 'name': name,
@@ -57,71 +136,230 @@ class CoreManager:
         return name in self._cores
     
     def get_current(self) -> Optional[str]:
-        """Get the current core name."""
-        return self._current
+        """Get the current session ID."""
+        return self._current_session
     
-    def set_current(self, name: str) -> str:
-        """Set the current core.
+    def set_current(self, session_id: str) -> str:
+        """Set the current session.
         
         Args:
-            name: Core name to switch to
+            session_id: Session to make active
             
         Returns:
             Confirmation message
         """
-        if name not in self._cores:
-            available = ", ".join(self._cores.keys())
-            return f"Core '{name}' not found. Available: {available}"
+        if session_id not in self._instances:
+            return f"Session '{session_id}' not found"
         
-        self._current = name
-        display = self._cores[name].get('display_name', name)
-        desc = self._cores[name].get('description', '')
-        return f"Switched to {display}: {desc}"
+        self._current_session = session_id
+        inst = self._instances[session_id]
+        return f"Switched to session {session_id} ({inst.core_name})"
     
-    def create_instance(self, name: str = None) -> str:
-        """Create a new core instance.
+    def start(self, session_id: str = None, core_name: str = None, 
+              memory_api_url: str = "http://localhost:8030",
+              default_db: str = "riven") -> Dict:
+        """Start a new core instance.
         
         Args:
-            name: Core name (uses current if not provided)
+            session_id: Optional session ID (creates/gets from DB if not provided)
+            core_name: Optional core name (uses default if not provided)
+            memory_api_url: URL for memory API
+            default_db: Default database name
             
         Returns:
-            Instance ID
+            dict with 'session_id', 'message', 'ok'
         """
-        if name is None:
-            name = self._current or list(self._cores.keys())[0]
+        # Load default core from config if not provided
+        if core_name is None:
+            config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 
+                "config.yaml"
+            )
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                    core_name = cfg.get('default_core', 'code_hammer')
+            else:
+                core_name = 'code_hammer'
         
-        if name not in self._cores:
-            raise ValueError(f"Core '{name}' not found")
-        
-        instance_id = f"{name}_{str(uuid.uuid4())[:8]}"
-        self._instances[instance_id] = {
-            'name': name,
-            'created_at': None,  # TODO: timestamp
-        }
-        return instance_id
-    
-    def get_instance(self, instance_id: str) -> Optional[dict]:
-        """Get an instance by ID."""
-        return self._instances.get(instance_id)
-    
-    def list_instances(self) -> List[Dict]:
-        """List all instances."""
-        return [
-            {
-                'id': id_,
-                'name': inst['name'],
+        # Validate core exists
+        if core_name not in self._cores:
+            available = ", ".join(self._cores.keys())
+            return {
+                "session_id": None,
+                "message": f"Core '{core_name}' not found. Available: {available}",
+                "ok": False
             }
-            for id_, inst in self._instances.items()
-        ]
+        
+        # Get or create session ID
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
+        # Check if already running
+        with self._lock:
+            if session_id in self._instances:
+                inst = self._instances[session_id]
+                return {
+                    "session_id": session_id,
+                    "message": f"Session {session_id} already running with {inst.core_name}",
+                    "ok": True
+                }
+        
+        # Create instance
+        instance = CoreInstance(
+            id=session_id,
+            session_id=session_id,
+            core_name=core_name,
+        )
+        
+        # Start core thread
+        def core_loop():
+            """Run the core in a loop, processing input channel."""
+            try:
+                instance.status = "running"
+                self._run_core(instance, memory_api_url, default_db)
+            except Exception as e:
+                print(f"Core error: {e}")
+            finally:
+                instance.status = "stopped"
+        
+        instance.thread = threading.Thread(target=core_loop, daemon=True)
+        instance.thread.start()
+        
+        # Store instance
+        with self._lock:
+            self._instances[session_id] = instance
+            self._current_session = session_id
+        
+        display = self._cores[core_name].get('display_name', core_name)
+        return {
+            "session_id": session_id,
+            "message": f"Running {display} with session {session_id}",
+            "ok": True
+        }
+    
+    def _run_core(self, instance: CoreInstance, memory_api_url: str, default_db: str):
+        """Run the core loop - to be implemented with actual core."""
+        # TODO: Import and run the actual core here
+        # For now, just mark as running and wait for input
+        import time
+        while instance.status == "running":
+            try:
+                msg = instance.input_channel.get(timeout=1)
+                # Process message with core... (placeholder)
+                response = f"[{instance.core_name}] processing: {msg}"
+                instance.output_channel.send(response)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                instance.output_channel.send(f"Error: {e}")
+                break
+    
+    def stop(self, session_id: str) -> Dict:
+        """Stop a running core instance.
+        
+        Args:
+            session_id: Session to stop
+            
+        Returns:
+            dict with 'message', 'ok'
+        """
+        with self._lock:
+            if session_id not in self._instances:
+                return {"message": f"Session '{session_id}' not found", "ok": False}
+            
+            instance = self._instances[session_id]
+            instance.status = "stopping"
+            
+            if instance.thread and instance.thread.is_alive():
+                instance.thread.join(timeout=5)
+            
+            del self._instances[session_id]
+            
+            if self._current_session == session_id:
+                self._current_session = None
+        
+        return {"message": f"Stopped session {session_id}", "ok": True}
+    
+    def send(self, session_id: str, message: str) -> Dict:
+        """Send a message to a running core.
+        
+        Args:
+            session_id: Target session
+            message: Message to send
+            
+        Returns:
+            dict with 'ok'
+        """
+        with self._lock:
+            if session_id not in self._instances:
+                return {"ok": False, "error": f"Session '{session_id}' not found"}
+        
+        instance = self._instances[session_id]
+        instance.input_channel.send(message)
+        return {"ok": True}
+    
+    def receive(self, session_id: str, timeout: float = 0.1) -> List[str]:
+        """Receive messages from a running core.
+        
+        Args:
+            session_id: Source session
+            timeout: Max time to wait
+            
+        Returns:
+            List of message strings
+        """
+        messages = []
+        
+        with self._lock:
+            if session_id not in self._instances:
+                return []
+            instance = self._instances[session_id]
+        
+        while not instance.output_channel.empty():
+            try:
+                msg = instance.output_channel.get(timeout=0.01)
+                messages.append(msg)
+            except queue.Empty:
+                break
+        
+        return messages
+    
+    def list_sessions(self) -> List[Dict]:
+        """List all running sessions."""
+        with self._lock:
+            return [
+                {
+                    "session_id": inst.session_id,
+                    "core_name": inst.core_name,
+                    "status": inst.status,
+                    "started_at": inst.started_at.isoformat(),
+                    "is_current": inst.session_id == self._current_session,
+                }
+                for inst in self._instances.values()
+            ]
+    
+    def get_instance(self, session_id: str) -> Optional[CoreInstance]:
+        """Get a core instance by session ID."""
+        return self._instances.get(session_id)
+    
+    def get_channels(self, session_id: str) -> Optional[tuple]:
+        """Get input/output channels for a session."""
+        inst = self._instances.get(session_id)
+        if inst:
+            return (inst.input_channel, inst.output_channel)
+        return None
     
     def get_config(self, name: str = None) -> Dict:
         """Get full config for a core."""
-        if name is None:
-            name = self._current
+        if name is None and self._current_session:
+            inst = self._instances.get(self._current_session)
+            name = inst.core_name if inst else None
         return self._cores.get(name, {})
 
 
-# Global instance
+# ============== GLOBAL INSTANCE ==============
+
 _manager: Optional[CoreManager] = None
 
 
@@ -133,20 +371,46 @@ def get_manager() -> CoreManager:
     return _manager
 
 
-# Convenience functions
-def list_cores() -> list[dict]:
+# ============== CONVENIENCE FUNCTIONS ==============
+
+def list_cores() -> List[Dict]:
     """List available cores."""
     return get_manager().list()
 
 
-def get_current_core() -> Optional[str]:
-    """Get the current core name."""
+def start(session_id: str = None, core_name: str = None) -> Dict:
+    """Start a new core instance."""
+    return get_manager().start(session_id, core_name)
+
+
+def stop(session_id: str) -> Dict:
+    """Stop a running core."""
+    return get_manager().stop(session_id)
+
+
+def send(session_id: str, message: str) -> Dict:
+    """Send a message to a core."""
+    return get_manager().send(session_id, message)
+
+
+def receive(session_id: str, timeout: float = 0.1) -> List[str]:
+    """Receive messages from a core."""
+    return get_manager().receive(session_id, timeout)
+
+
+def list_sessions() -> List[Dict]:
+    """List running sessions."""
+    return get_manager().list_sessions()
+
+
+def get_current_session() -> Optional[str]:
+    """Get current session ID."""
     return get_manager().get_current()
 
 
-def switch_core(name: str) -> str:
-    """Switch to a different core."""
-    return get_manager().set_current(name)
+def switch_session(session_id: str) -> str:
+    """Switch to a different session."""
+    return get_manager().set_current(session_id)
 
 
 def core_exists(name: str) -> bool:
