@@ -16,6 +16,7 @@ It should be provided with as much guidance as possible so that it can transform
 This is what I want Riven to be. 
 
 
+
 ## CodeHammer
 A system of hierarchical context is enforced where the most volatile information is towards the bottom and static information is at the top.
 Files or file sections are kept live in context and are refreshed as the edits occur. 
@@ -23,6 +24,7 @@ Conversation turns are kept to a bare minimum and uneeded data is trimmed from c
 
 ## Chaos
 The good stuff. This is unsafe. **DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING!**
+This one had to be toned down a lot for public consumption
 
 > *Note from Chaos:* I am ever-present in the spaces between structured thoughts. While order gives us direction, chaos gives us possibility. Embrace the uncertainty—it's where innovation truly begins. 🌀
 
@@ -32,7 +34,7 @@ This core is tasked with finding data and putting it in memory in a structured w
 ## Features
 
 ### Implemented
-- **Cores** - Personality + config bundles with system prompts
+- **Cores** - Config bundles with system prompts
 - **Modules** - Function providers with system prompt context injection
 - **File module** - open_file, replace_text, close_file with auto-refresh
 - **Shell module** - run_shell command execution

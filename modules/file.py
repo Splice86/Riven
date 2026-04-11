@@ -110,17 +110,20 @@ class DocumentManager:
         path: str,
         old_text: str,
         new_text: str,
+        threshold: float = 0.95,
     ) -> str:
         """Replace text anywhere in file using fuzzy matching.
         
-        Uses fuzzy matching (Jaro-Winkler 95%+) to find the text anywhere in the file.
+        Uses fuzzy matching (Jaro-Winkler) to find the text anywhere in the file.
         No need to specify line numbers - just provide the text to find and replace.
         
         Args:
             path: Path to the file.
-            old_text: Text to find (will use fuzzy matching).
+            old_text: Text to find (uses fuzzy matching).
             new_text: Replacement text.
-            
+            threshold: Minimum similarity score (0.0-1.0). Lower = more flexible.
+                       Default 0.95 means 95% similar required.
+        
         Returns:
             Confirmation message with what was replaced.
         """
@@ -131,43 +134,28 @@ class DocumentManager:
         
         doc = self._documents[abs_path]
         
-        # First try exact match
-        found = False
-        for i, line in enumerate(doc.lines):
-            if old_text in line:
-                new_line = line.replace(old_text, new_text, 1)
-                doc.lines[i] = new_line
-                found = True
-                break
-        
-        if not found:
-            # Try fuzzy matching across the document
-            span, score = _find_best_window(doc.lines, old_text)
-            if span:
-                start, end = span
-                # Replace the matched span with new_text
-                new_lines = new_text.splitlines(keepends=True)
-                if new_lines and not new_lines[-1].endswith('\n'):
-                    new_lines[-1] += '\n'
-                doc.lines[start:end] = new_lines
-                doc.content = ''.join(doc.lines)
-                self.save(abs_path)
-                return f"Replaced lines {start+1}-{end} (fuzzy match {score:.0%})"
-            else:
-                # Show what's actually in the file to help model
-                actual_content = ''.join(doc.lines[:20])
-                return (
-                    f"Text not found. The text you're looking for is not in the file.\n"
-                    f"Expected (not in file):\n{repr(old_text[:200])}\n\n"
-                    f"Best fuzzy match: {score:.0%}\n"
-                    f"Actual file content (first 20 lines):\n{actual_content[:500]}\n\n"
-                    f"Tip: Use open_file first to see current content, then provide EXACT text to replace."
-                )
-        
-        doc.content = ''.join(doc.lines)
-        self.save(abs_path)
-        
-        return f"Replaced text"
+        # Use fuzzy matching across the document
+        span, score = _find_best_window(doc.lines, old_text, threshold)
+        if span:
+            start, end = span
+            # Replace the matched span with new_text
+            new_lines = new_text.splitlines(keepends=True)
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines[-1] += '\n'
+            doc.lines[start:end] = new_lines
+            doc.content = ''.join(doc.lines)
+            self.save(abs_path)
+            return f"Replaced lines {start+1}-{end} (fuzzy match {score:.0%})"
+        else:
+            # Show what's actually in the file to help model
+            actual_content = ''.join(doc.lines[:20])
+            return (
+                f"Text not found. The text you're looking for is not in the file.\n"
+                f"Expected (not in file):\n{repr(old_text[:200])}\n\n"
+                f"Best fuzzy match: {score:.0%} (threshold was {threshold:.0%})\n"
+                f"Actual file content (first 20 lines):\n{actual_content[:500]}\n\n"
+                f"Tip: Use open_file first to see current content. Lower threshold if needed."
+            )
     
     def save(self, path: str) -> str:
         """Save an open document's in-memory changes to disk."""
@@ -235,18 +223,20 @@ def get_module():
         """
         return manager.open(path)
     
-    async def replace_text(path: str, old_text: str, new_text: str) -> str:
+    async def replace_text(path: str, old_text: str, new_text: str, threshold: float = 0.95) -> str:
         """Replace text anywhere in file using fuzzy matching.
         
         Args:
             path: Path to the file.
             old_text: Text to find (uses fuzzy matching).
             new_text: Replacement text.
+            threshold: Minimum similarity (0.0-1.0). Default 0.95.
+                       Lower = more flexible, Higher = more strict.
             
         Returns:
             Confirmation message with what was replaced.
         """
-        result = manager.replace_text(path, old_text, new_text)
+        result = manager.replace_text(path, old_text, new_text, threshold)
         mark_dirty()
         return result
     
