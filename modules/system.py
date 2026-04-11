@@ -76,7 +76,7 @@ def get_module():
     def write_context(filename: str = None) -> str:
         """Write current session context to a file for debugging.
         
-        Dumps: system info, all module contexts (file, memory, time, etc.),
+        Dumps: system info, full system prompt, all module contexts (file, memory, time, etc.),
         and all conversation turns from memory API.
         
         Args:
@@ -87,6 +87,7 @@ def get_module():
         """
         import requests
         import platform
+        import yaml
         
         # Generate filename if not provided
         if not filename:
@@ -104,6 +105,17 @@ def get_module():
         lines.append(f"Python: {platform.python_version()}")
         lines.append(f"Platform: {platform.platform()}")
         lines.append(f"Executable: {sys.executable}")
+        
+        # System prompt from config
+        lines.append("\n### SYSTEM PROMPT ###")
+        default_core = CONFIG.get("default_core", "code_hammer")
+        cores_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cores", f"{default_core}.yaml")
+        try:
+            with open(cores_path) as f:
+                core_config = yaml.safe_load(f)
+            lines.append(core_config.get("system_prompt", "(not found)"))
+        except Exception as e:
+            lines.append(f"Error loading system prompt: {e}")
         
         # Get module contexts
         lines.append("\n### MODULE CONTEXTS ###")
