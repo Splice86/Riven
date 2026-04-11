@@ -28,8 +28,7 @@ system_prompt: |
   {file}
 
 tools: ["all"]
-llm_url: "$ALTERNATE_LLM_URL"
-llm_model: "$ALTERNATE_LLM_MODEL"
+llm_config: alternate
 memory_db: "chaos"
 tool_timeout: 120
 strip_thinking: true

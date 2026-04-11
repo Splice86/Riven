@@ -57,15 +57,6 @@ def _load_config() -> dict:
                 if loaded:
                     config.update(loaded)
     
-    # Load secrets and resolve placeholders
-    secrets = _load_secrets()
-    memory_api_url = secrets.get('memory_api', {}).get('url', 'http://127.0.0.1:8030')
-    
-    # Resolve placeholders in config
-    if 'memory_api' in config and 'url' in config['memory_api']:
-        if config['memory_api']['url'] == '$MEMORY_API_URL':
-            config['memory_api']['url'] = memory_api_url
-    
     return config
 
 CONFIG = _load_config()
@@ -86,43 +77,34 @@ def _load_secrets() -> dict:
     return {}
 
 
-SECRETS = _load_secrets()
+from secrets import get_secret, get_llm_config, get_memory_api
+
+# Legacy env/import fallback
+MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
+LLM_URL = os.environ.get("LLM_URL", get_secret('llm', 'default', 'url', default="http://localhost:8000/v1/"))
+LLM_API_KEY = os.environ.get("LLM_API_KEY", get_secret('llm', 'default', 'api_key', default="sk-dummy"))
+LLM_MODEL = os.environ.get("LLM_MODEL", get_secret('llm', 'default', 'model', default="nvidia/MiniMax-M2.5-NVFP4"))
+DEFAULT_DB = os.environ.get("MEMORY_DB", get_secret('memory_api', 'db_name', default="default"))
+MAX_OUTPUT_LINES = 1000
 
 
 def _resolve_core_config(core_config: dict) -> dict:
-    """Resolve $PRIMARY_* and $ALTERNATE_* placeholders in core config."""
+    """Resolve llm_config: name to actual LLM values from secrets."""
+    from secrets import get_llm_config
+    
     resolved = core_config.copy()
     
-    primary = SECRETS.get('llm', {}).get('primary', {})
-    alternate = SECRETS.get('llm', {}).get('alternate', {})
-    
-    for key, value in resolved.items():
-        if isinstance(value, str):
-            if value == "$PRIMARY_LLM_URL":
-                resolved[key] = primary.get('url', "http://127.0.0.1:8000/v1")
-            elif value == "$PRIMARY_LLM_MODEL":
-                resolved[key] = primary.get('model', "nvidia/MiniMax-M2.5-NVFP4")
-            elif value == "$PRIMARY_LLM_API_KEY":
-                resolved[key] = primary.get('api_key', "sk-dummy")
-            elif value == "$ALTERNATE_LLM_URL":
-                resolved[key] = alternate.get('url', "http://127.0.0.1:8000/v1")
-            elif value == "$ALTERNATE_LLM_MODEL":
-                resolved[key] = alternate.get('model', "nvidia/MiniMax-M2.5-NVFP4")
-            elif value == "$ALTERNATE_LLM_API_KEY":
-                resolved[key] = alternate.get('api_key', "sk-dummy")
-        elif isinstance(value, dict):
-            resolved[key] = _resolve_core_config(value)
+    # Handle llm_config: primary/alternate
+    if 'llm_config' in resolved:
+        config_name = resolved.pop('llm_config')
+        llm_cfg = get_llm_config(config_name)
+        if not llm_cfg.get('url'):
+            raise ValueError(f"llm_config '{config_name}' requires url in secrets.yaml")
+        resolved['llm_url'] = llm_cfg['url']
+        resolved['llm_model'] = llm_cfg['model']
+        resolved['llm_api_key'] = llm_cfg['api_key']
     
     return resolved
-
-
-# Legacy env/import fallback
-MEMORY_API_URL = os.environ.get("MEMORY_API_URL", CONFIG.get('memory_api', {}).get('url', "http://127.0.0.1:8030"))
-LLM_URL = os.environ.get("LLM_URL", CONFIG.get('llm', {}).get('url', "http://127.0.0.1:8000/v1/"))
-LLM_API_KEY = os.environ.get("LLM_API_KEY", CONFIG.get('llm', {}).get('api_key', "sk-dummy"))
-LLM_MODEL = os.environ.get("LLM_MODEL", CONFIG.get('llm', {}).get('model', "nvidia/MiniMax-M2.5-NVFP4"))
-DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "default"))
-MAX_OUTPUT_LINES = 1000
 
 
 class MemoryClient:
@@ -605,5 +587,4 @@ def get_core(name: str = "code_hammer") -> Core:
 def list_cores() -> list[str]:
     """List available core names from cores/ folder."""
     return list(_load_cores().keys())
-
 

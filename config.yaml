@@ -9,5 +9,4 @@ default_core: code_hammer
 
 # Memory API settings
 memory_api:
-  url: "$MEMORY_API_URL"
   db_name: "riven"

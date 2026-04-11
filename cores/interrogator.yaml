@@ -29,8 +29,7 @@ system_prompt: |
   {file}
 
 tools: ["all"]
-llm_url: "$PRIMARY_LLM_URL"
-llm_model: "$PRIMARY_LLM_MODEL"
+llm_config: primary
 memory_db: "interrogator"
 tool_timeout: 45
 strip_thinking: true
