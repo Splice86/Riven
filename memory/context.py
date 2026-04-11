@@ -405,9 +405,9 @@ class Context:
         total_summarized = 0
         
         while True:
-            # Get current unsummarized memories (get all, sort oldest first for clustering)
+            # Get unsummarized (newest first from _get_unsummarized), reverse to get oldest first
             unsummarized = self._get_unsummarized(limit=10000, session=session)
-            # Reverse to get oldest first (for summarizing oldest messages first)
+            # Reverse to get oldest first for clustering
             unsummarized = list(reversed(unsummarized))
             
             if not unsummarized:
