@@ -320,6 +320,7 @@ class Context:
             content=summary_text,
             keywords=["context", "summary"],
             properties={
+                "role": "summary",
                 "is_summary": "true",
                 "summarized_count": str(len(memories)),
                 "summarized_tokens": str(total_tokens)
