@@ -26,8 +26,8 @@ debug_context_*.txt
 # Environment
 .env
 
-# Launch script with local IPs
-launch.sh
+# Launch script
+# Note: root launch.sh is for running API+CLI together
 
 # Secrets (API keys, endpoints)
 secrets.yaml
