@@ -239,21 +239,54 @@ class CoreManager:
         }
     
     def _run_core(self, instance: CoreInstance, memory_api_url: str, default_db: str):
-        """Run the core loop - to be implemented with actual core."""
-        # TODO: Import and run the actual core here
-        # For now, just mark as running and wait for input
-        import time
-        while instance.status == "running":
+        """Run the core loop with actual core."""
+        import asyncio
+        import threading
+        from core import get_core
+        
+        # Create the real core instance
+        core = get_core(instance.core_name)
+        
+        # Use the session_id from the instance
+        session_id = instance.session_id
+        
+        # Track if there's a pending operation
+        pending_event = threading.Event()
+        
+        def run_async():
+            """Run async core in background thread."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             try:
-                msg = instance.input_channel.get(timeout=1)
-                # Process message with core... (placeholder)
-                response = f"[{instance.core_name}] processing: {msg}"
-                instance.output_channel.send(response)
-            except queue.Empty:
-                continue
-            except Exception as e:
-                instance.output_channel.send(f"Error: {e}")
-                break
+                while instance.status == "running":
+                    # Wait for input
+                    try:
+                        msg = instance.input_channel.get(timeout=0.5)
+                    except queue.Empty:
+                        continue
+                    
+                    # Run the core
+                    try:
+                        result = loop.run_until_complete(core.run(msg))
+                        
+                        # Send output
+                        if result and hasattr(result, 'output'):
+                            output = str(result.output)
+                            instance.output_channel.send(output)
+                        elif result:
+                            instance.output_channel.send(str(result))
+                    except Exception as e:
+                        instance.output_channel.send(f"Error: {e}")
+                    finally:
+                        pending_event.clear()
+                        
+            finally:
+                loop.close()
+        
+        # Run in background thread
+        core_thread = threading.Thread(target=run_async, daemon=True)
+        core_thread.start()
     
     def stop(self, session_id: str) -> Dict:
         """Stop a running core instance.
