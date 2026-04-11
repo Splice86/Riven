@@ -179,19 +179,21 @@ class DocumentManager:
         return "\n".join(output_lines)
     
     def replace_lines(self, path: str, start: int, end: int, new_content: str, auto_save: bool = True) -> str:
-        """Replace a range of lines with new content.
+        """Replace a single line with new content.
         
-        Note: You must provide correct indentation in new_content. The function
-        does not adjust indentation automatically - match the surrounding
-        code's indentation (e.g., 4 spaces for Python).
+        WARNING: Only supports single-line replacement (start == end).
+        For multi-line edits, use insert_lines + remove_lines separately.
         
         Args:
             path: Path to the file.
-            start: Start line number (1-indexed, inclusive).
-            end: End line number (inclusive).
-            new_content: The new content to replace the range with.
+            start: Line number to replace (1-indexed).
+            end: Must equal start for single-line replacement.
+            new_content: The new content for that line.
             auto_save: If True, automatically save after editing (default: True).
         """
+        # Only allow single-line replacement to prevent indentation issues
+        if start != end:
+            return f"Error: Multi-line replacement not supported. Use insert_lines + remove_lines. Got start={start}, end={end}"
         abs_path = os.path.abspath(path)
         
         if abs_path not in self._documents:
@@ -301,7 +303,8 @@ class DocumentManager:
         Args:
             path: Path to the file.
             line_number: Line number to operate on (1-indexed).
-            old_text: Text pattern to find (literal or regex if use_regex=True).
+            old_text: Text pattern to find on THAT LINE ONLY (literal or regex if use_regex=True).
+                     WARNING: Do NOT include docstrings or multi-line text - only the line itself.
             new_text: Replacement text.
             use_regex: If True, treat old_text as a regex pattern.
             auto_save: If True, automatically save after editing (default: True).
@@ -329,30 +332,37 @@ class DocumentManager:
                 return f"No match found for regex: {old_text}"
             new_line = re.sub(old_text, new_text, line)
         else:
-            # First try exact match
-            if old_text in line:
-                new_line = line.replace(old_text, new_text, 1)
+            # If old_text has newlines, extract first line only
+            old_text_first_line = old_text.split('\n')[0].strip()
+            
+            # First try exact match on first line only
+            if old_text_first_line in line:
+                # Replace the first matching occurrence
+                new_line = line.replace(old_text_first_line, new_text, 1)
             else:
-                # Try fuzzy matching across the document
-                span, score = _find_best_window(doc.lines, old_text)
+                # Try fuzzy matching on just this line
+                span, score = _find_best_window([line], old_text_first_line)
                 if span:
-                    start, end = span
-                    # Replace the matched span with new_text
-                    new_lines = new_text.splitlines(keepends=True)
-                    if new_lines and not new_lines[-1].endswith('\n'):
-                        new_lines[-1] += '\n'
-                    doc.lines[start:end] = new_lines
-                    doc.content = ''.join(doc.lines)
-                    if auto_save:
-                        self.save(abs_path)
-                    return f"Replaced lines {start+1}-{end} (fuzzy match {score:.0%})"
+                    # Fuzzy match found - replace entire line with new_text
+                    new_line = new_text
+                    if not new_line.endswith('\n'):
+                        new_line += '\n'
                 else:
                     # No match - provide helpful error with actual line content
+                    # If old_text was multi-line, be more helpful
+                    if '\n' in old_text:
+                        return (
+                            f"Text not found. old_text should be ONE LINE only, not multi-line.\n"
+                            f"Your old_text had {old_text.count(chr(10))+1} lines.\n"
+                            f"First line of your old_text: {repr(old_text_first_line)}\n"
+                            f"Actual line {line_number}: {repr(line.strip())}\n"
+                            f"Tip: Use only the function signature line, not the docstring."
+                        )
                     return (
                         f"Text not found at line {line_number}.\n"
                         f"Expected: {repr(old_text)}\n"
                         f"Actual: {repr(line.strip())}\n"
-                        f"Best match in file: {score:.0%}\n"
+                        f"Best match score: {score:.0%}\n"
                         f"Tip: Copy the EXACT text from the file and paste into old_text."
                     )
         
@@ -569,26 +579,29 @@ You should use this context instead of calling get_lines() or re-opening files.
 
 ### Workflow: Open → Edit → Save → Close
 1. **open_file(path)**: Opens a file (do this first)
-2. **replace_lines(path, start, end, new_content)**: Replace by line numbers
-3. **insert_lines(path, after_line, new_content)**: Insert after a line
+2. **replace_lines(path, line, line, new_content)**: Replace ONE line by number (start == end)
+3. **insert_lines(path, after_line, new_content)**: Insert new lines after a line
 4. **remove_lines(path, start, end)**: Delete lines by number
-5. **replace_text_at_line(path, line_number, old_text, new_text)**: Replace text within a line
+5. **replace_text_at_line(path, line_number, old_text, new_text)**: Replace text within ONE line
 6. **save_file(path)**: Write changes to disk
 7. **close_file(path)**: Close the file
 
+### CRITICAL Restrictions
+- replace_lines: Only supports SINGLE line (start must equal end)
+- replace_text_at_line: old_text must be ONE LINE only - never include docstrings or multi-line!
+- For multi-line changes: use insert_lines + remove_lines separately
+
 ### Tips
-- Check {file} in system prompt for open file line numbers - don't call get_lines()
+- Check {file} in system prompt for open file line numbers
 - Don't re-open files - they're already in your context
-- Use line numbers from the system prompt context
-- For replace_text_at_line: copy EXACT text from the file for old_text
-- If "Text not found" error: copy the exact text from the system prompt
-- Fuzzy matching: if exact match fails, will search for 95%+ similar match
+- For replace_text_at_line: copy EXACT single line text from file for old_text
+- NEVER pass multi-line text to old_text - it will fail!
 - Always save_file after edits before closing
 
 ### Example
 ```
-open_file("main.py")  # File is now in context with line numbers
-replace_lines("main.py", 10, 15, "new content here")  # Use line numbers from {file}
+open_file("main.py")
+replace_lines("main.py", 10, 10, "new content here")  # Single line only
 save_file("main.py")
 close_file("main.py")
 ```"""
