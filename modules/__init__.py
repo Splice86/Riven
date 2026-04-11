@@ -143,3 +143,98 @@ def get_all_modules() -> list:
 
 # Global registry
 registry = ModuleRegistry()
+
+# Track module file mtimes for auto-reload
+_module_mtimes: dict[str, float] = {}
+
+
+def get_module_mtimes() -> dict[str, float]:
+    """Get modification times of all module files."""
+    import os
+    mtimes = {}
+    modules_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    for filename in os.listdir(modules_dir):
+        if filename.startswith('_'):
+            continue
+        if not filename.endswith('.py'):
+            continue
+        
+        path = os.path.join(modules_dir, filename)
+        mtimes[filename] = os.path.getmtime(path)
+    
+    return mtimes
+
+
+def check_modules_changed() -> bool:
+    """Check if any module files have changed since last check."""
+    global _module_mtimes
+    
+    current_mtimes = get_module_mtimes()
+    
+    # Check if any new or modified files
+    for filename, mtime in current_mtimes.items():
+        if filename not in _module_mtimes:
+            return True
+        if mtime > _module_mtimes[filename]:
+            return True
+    
+    # Check if any files were deleted
+    for filename in _module_mtimes:
+        if filename not in current_mtimes:
+            return True
+    
+    return False
+
+
+def update_module_mtimes() -> None:
+    """Update the stored modification times."""
+    global _module_mtimes
+    _module_mtimes = get_module_mtimes()
+
+
+def reload_modules(registry: ModuleRegistry) -> str:
+    """Reload all modules from disk.
+    
+    Args:
+        registry: The registry to reload modules into
+        
+    Returns:
+        Confirmation message
+    """
+    import importlib
+    import os
+    import sys
+    
+    modules_dir = os.path.dirname(os.path.abspath(__file__))
+    reloaded = []
+    errors = []
+    
+    for filename in os.listdir(modules_dir):
+        if filename.startswith('_'):
+            continue
+        if not filename.endswith('.py'):
+            continue
+        
+        module_name = filename[:-3]
+        
+        try:
+            # Force reimport
+            if module_name in sys.modules:
+                importlib.reload(sys.modules[f'modules.{module_name}'])
+            else:
+                importlib.import_module(f'modules.{module_name}')
+            
+            mod = sys.modules[f'modules.{module_name}']
+            if hasattr(mod, 'get_module'):
+                module = mod.get_module()
+                registry.register(module)
+                reloaded.append(module_name)
+        except Exception as e:
+            errors.append(f"{module_name}: {e}")
+    
+    update_module_mtimes()
+    
+    if errors:
+        return f"Reloaded: {reloaded}. Errors: {errors}"
+    return f"Reloaded modules: {reloaded}"
