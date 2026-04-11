@@ -1,6 +1,7 @@
 """Core agentic loop - pydantic_ai implementation."""
 
 import asyncio
+from datetime import datetime
 import logging
 import os
 import re
@@ -406,6 +407,18 @@ class Core:
         # Build prompts first (don't add to memory until success)
         system_prompt = self._build_system_prompt()
         user_prompt, message_history = self._build_prompt(prompt)
+        
+        # Debug: dump prompt to file
+        debug_file = f"debug_prompt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(debug_file, "w") as f:
+            f.write("=== SYSTEM PROMPT ===\n")
+            f.write(system_prompt)
+            f.write("\n\n=== USER PROMPT ===\n")
+            f.write(user_prompt)
+            f.write("\n\n=== MESSAGE HISTORY ===\n")
+            for m in message_history:
+                f.write(str(m) + "\n")
+        logger.info(f"Debug prompt dumped to: {debug_file}")
         
         # Run agent with message history injected
         result = await self._run_with_retry(system_prompt, user_prompt, message_history)
