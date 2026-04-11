@@ -15,29 +15,54 @@ def get_prompt_prefix(core_name: str) -> str:
 
 
 def print_banner() -> None:
-    """Print edgy cyberpunk ASCII art banner."""
-    # ANSI colors: red -> magenta -> purple
-    RED = "\033[91m"
-    MAGENTA = "\033[95m"
-    PURPLE = "\033[35m"
-    CYAN = "\033[96m"
-    RESET = "\033[0m"
-    
-    banner = f"""
-{RED}      ███████{MAGENTA}╗{RED}  █████{MAGENTA}╗ {RED} ██████{MAGENTA}╗███████{MAGENTA}╗{RED}██████{MAGENTA}╗ {RED}██████{MAGENTA}╗  ██████{MAGENTA}╗ {RED}██████{MAGENTA}╗ {RED}███████{MAGENTA}╗{RED}██████{MAGENTA}╗{RESET}
-{MAGENTA}     ██{RED}╔══{MAGENTA}╝{RED}╚══{MAGENTA}╝{RED}██{MAGENTA}╔═══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔═══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔════{RED}██{MAGENTA}╗{RESET}
-{MAGENTA}     ██{RED}║{MAGENTA}║{RED}     █████{RED}██{MAGENTA}╗{RED}██████{MAGENTA}╗{RED}█████{MAGENTA}╗ {RED}██{MAGENTA}║   ██{MAGENTA}║{RED}█████{MAGENTA}╗ {RED}██████{MAGENTA}╗{RED}██████{MAGENTA}╗{RED}██████{MAGENTA}╗{RESET}
-{MAGENTA}     ██{RED}║{MAGENTA}║{RED}     ██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}║   ██{MAGENTA}║{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RED}██{MAGENTA}╔══{RED}██{MAGENTA}╗{RESET}
-{MAGENTA}╗{RED}╗███████{MAGENTA}╗{RED}██{MAGENTA}║{RED} ╚{MAGENTA}╗{RED}██{MAGENTA}╔╝{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}╚██████{MAGENTA}╔╝{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RED}██{MAGENTA}║  ██{MAGENTA}║{RESET}
-{MAGENTA}╚══════╝{RED}╚═╝{MAGENTA} ╚═╝{RED} ╚═╝  ╚═╝{MAGENTA}╚═╝  ╚═╝{RED}╚═════╝ {MAGENTA}╚═╝  ╚═╝{RED}╚═════╝ {MAGENTA}╚═╝  ╚═╝{RED}╚═╝  ╚═╝{RED}╚═╝  ╚═╝{RESET}
-{PURPLE}        ██████╗ ██████╗ ███████╗██╗   ██╗███████╗████████╗███████╗███╗   ███╗{RESET}
-{PURPLE}        ██╔══██╗██╔══██╗██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔════╝████╗ ████║{RESET}
-{PURPLE}        ██████╔╝██████╔╝█████╗  ██║   ██║███████╗   ██║   █████╗  ██╔████╔██║{RESET}
-{PURPLE}        ██╔══██╗██╔══██╗██╔══╝  ╚██╗ ██╔╝╚════██║   ██║   ██╔══╝  ██║╚██╔╝██║{RESET}
-{PURPLE}        ██║  ██║██║  ██║███████╗ ╚████╔╝ ███████║   ██║   ███████╗ ██║ ╚═╝ ██║{RESET}
-{CYAN}        ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝   ╚═╝   ╚══════╝ ╚═╝     ╚═╝{RESET}
-"""
-    print(banner)
+    """Print cyberpunk ASCII art banner using pyfiglet."""
+    try:
+        import pyfiglet
+        from pyfiglet import FigletFont
+        
+        # Custom gradient colors: red -> magenta -> purple -> cyan
+        RED = "\033[91m"
+        MAGENTA = "\033[95m"
+        PURPLE = "\033[35m"
+        CYAN = "\033[96m"
+        RESET = "\033[0m"
+        
+        # Try different fonts that look good
+        fonts = ["slant", "big", "block", "doom", "standard"]
+        chosen_font = "slant"
+        
+        for font in fonts:
+            try:
+                result = pyfiglet.figlet_format("RIVEN", font=font)
+                if len(result.split('\n')[0]) < 80:  # Reasonable width
+                    chosen_font = font
+                    break
+            except Exception:
+                continue
+        
+        result = pyfiglet.figlet_format("RIVEN", font=chosen_font)
+        
+        # Apply gradient by lines
+        lines = result.split('\n')
+        n = len(lines)
+        gradient_colors = [RED, MAGENTA, PURPLE, PURPLE, CYAN]
+        
+        for i, line in enumerate(lines):
+            if line.strip():
+                color_idx = min(i * len(gradient_colors) // n, len(gradient_colors) - 1)
+                print(f"{gradient_colors[color_idx]}{line}{RESET}")
+            else:
+                print()
+        
+        # Tagline
+        print(f"{CYAN}┌{'─' * 40}┐{RESET}")
+        print(f"{CYAN}│{RESET}  {MAGENTA}Digital Puppy{RED} | {PURPLE}Code Agent{CYAN}           {RESET}{CYAN}│{RESET}")
+        print(f"{CYAN}└{'─' * 40}┘{RESET}")
+        
+    except ImportError:
+        # Fallback if pyfiglet not installed
+        print("RIVEN")
+        print("------")
 
 
 async def run_repl(core_name: str) -> None:

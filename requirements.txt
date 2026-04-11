@@ -3,3 +3,4 @@ pydantic-ai>=1.0.0
 httpx
 requests
 numpy
+pyfiglet
