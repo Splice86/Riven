@@ -4,3 +4,4 @@ httpx
 requests
 numpy
 pyfiglet
+jellyfish
