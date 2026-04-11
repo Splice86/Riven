@@ -27,11 +27,13 @@ def get_module():
         
         Args:
             message: Optional goodbye message to display.
-        
-        Returns:
-            Goodbye message.
+            
+        Note:
+            This will terminate the session after the current tool completes.
         """
         _exit_requested.set()
+        # Print goodbye immediately so user sees it
+        print(f"\n{message}\n")
         return message
     
     def check_reload_modules() -> str:

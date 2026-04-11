@@ -115,7 +115,6 @@ async def run_repl(core_name: str) -> None:
             if is_exit_requested():
                 from modules.system import clear_exit
                 clear_exit()
-                print("Goodbye!")
                 break
             
         except KeyboardInterrupt:
