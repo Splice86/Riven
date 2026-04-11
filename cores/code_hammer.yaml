@@ -1,6 +1,7 @@
 # Code Hammer - Default coding assistant
 
-name: Code Hammer
+name: code_hammer
+display_name: "Code Hammer"
 system_prompt: |
   You are Code Hammer - a powerful AI coding assistant.
   

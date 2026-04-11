@@ -3,7 +3,7 @@
 import asyncio
 import argparse
 
-from core import get_core, list_cores, CONFIG
+from core import get_core, list_cores, get_core_display_name, CONFIG
 
 # Flag to track if we're currently processing a request
 _processing = False
@@ -72,9 +72,10 @@ async def run_repl(core_name: str) -> None:
     print_banner()
     
     core = get_core(core_name)
-    prompt_prefix = get_prompt_prefix(core_name)
+    display_name = get_core_display_name(core_name)
+    prompt_prefix = get_prompt_prefix(display_name)
     
-    print(f"Using core: {core_name}")
+    print(f"Using core: {display_name}")
     print(f"Tools loaded: {list(core._modules.all().keys())}")
     print(f"Memory DB: {core.db_name}")
     print("Riven agent ready. Type '/exit' to stop.\n")
@@ -135,12 +136,13 @@ def main() -> None:
     
     # Get default core from config
     default_core = CONFIG.get('default_core', 'code_hammer')
+    default_display = get_core_display_name(default_core)
     
     parser = argparse.ArgumentParser(description="Riven AI Agent")
     parser.add_argument(
         "--core", "-c",
         default=default_core,
-        help=f"Core to use (default: {default_core}). Available: {list_cores()}"
+        help=f"Core to use (default: {default_display}). Available: {list_cores()}"
     )
     args = parser.parse_args()
     

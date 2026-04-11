@@ -435,6 +435,16 @@ def _load_cores() -> dict:
     return cores
 
 
+def get_core_display_name(core_name: str) -> str:
+    """Get the display name for a core."""
+    cores = _load_cores()
+    if core_name in cores:
+        return cores[core_name].get('display_name', core_name)
+    return core_name
+    
+    return cores
+
+
 def get_core(name: str = "code_hammer") -> Core:
     """Factory function to create a core by name from config.
     
