@@ -415,28 +415,49 @@ class Core:
         return result
 
 
-def get_core(name: str = "default") -> Core:
+def _load_cores() -> dict:
+    """Load cores from the cores/ folder."""
+    import glob
+    
+    cores = {}
+    cores_dir = "cores"
+    
+    if not os.path.exists(cores_dir):
+        return cores
+    
+    for filepath in glob.glob(os.path.join(cores_dir, "*.yaml")):
+        with open(filepath) as f:
+            core_config = yaml.safe_load(f)
+            if core_config and 'name' in core_config:
+                core_name = core_config.pop('name')
+                cores[core_name] = core_config
+    
+    return cores
+
+
+def get_core(name: str = "code_hammer") -> Core:
     """Factory function to create a core by name from config.
     
     Args:
-        name: Name of the core in config (default: "default")
+        name: Name of the core in cores/ folder (default: "code_hammer")
     
     Returns:
         Configured Core instance
     
     Raises:
-        ValueError: If core name not found in config
+        ValueError: If core name not found
     """
-    cores = CONFIG.get('cores', {})
+    cores = _load_cores()
     
     if name not in cores:
-        raise ValueError(f"Core '{name}' not found in config. Available: {list(cores.keys())}")
+        raise ValueError(f"Core '{name}' not found. Available: {list(cores.keys())}")
     
     return Core(config=cores[name])
 
 
+
 def list_cores() -> list[str]:
-    """List available core names from config."""
-    return list(CONFIG.get('cores', {}).keys())
+    """List available core names from cores/ folder."""
+    return list(_load_cores().keys())
 
 

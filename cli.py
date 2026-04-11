@@ -75,7 +75,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Riven AI Agent")
     parser.add_argument(
         "--core", "-c",
-        default="default",
+        default="code_hammer",
         help=f"Core to use (default: code_hammer). Available: {list_cores()}"
     )
     args = parser.parse_args()

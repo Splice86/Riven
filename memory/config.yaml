@@ -30,11 +30,11 @@ llm:
 # Context / Summarization settings
 context:
   # Max tokens in active context before triggering summarization
-  max_tokens: 32000
+  max_tokens: 100000
   # Temporal clustering: new cluster if gap > this many minutes
-  cluster_gap_minutes: 1
+  cluster_gap_minutes: 2
   # Don't summarize messages from the last N minutes (active session)
-  cluster_exclude_minutes: 10
+  cluster_exclude_minutes: 3
   # Minimum cluster size to consider for summarization
   min_cluster_size: 3
 

@@ -1,65 +1,8 @@
 # Riven Configuration
 # This file is gitignored - add local overrides to config_local.yaml
-
-# =============================================================================
-# Agent Cores Configuration
-# =============================================================================
-# Each core defines: system_prompt, tools, llm, and memory_db
-# tools: list of module names to load, or ["all"] for all available tools
-
-cores:
-  code_hammer:
-    system_prompt: |
-      You are Code Hammer - a powerful AI coding assistant.
-      
-      Like a hammer shapes metal, you shape code with precision and force.
-      You specialize in writing, refactoring, and fixing code.
-      
-      When reading files, use the open_file tool instead of shell commands like cat, less, or head. 
-      The file open tool provides better formatting and line numbering. Only use shell commands for 
-      executing programs or when you specifically need shell features (pipes, redirects, etc.).
-      
-      IMPORTANT file workflow: Once a document is opened with open_file, it stays in memory and you 
-      can use get_lines, replace_lines, insert_lines, or remove_lines to edit it without re-opening. 
-      When finished, use save_file to write changes, then close_file to clean up. Don't re-open a file 
-      you've already opened - it's already in context.
-    tools: ["all"]
-    llm_url: "http://100.90.58.38:8000/v1"
-    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
-    memory_db: "riven"
-    tool_timeout: 30
-    strip_thinking: true  # Remove thinking tags + content from memory
-    store_tool_results: 3  # 0=skip, N=store last N lines (truncates long output)
-
-  coding:
-    system_prompt: |
-      You are an expert software developer.
-      
-      Focus on writing clean, maintainable code. Use the file tools to read and write code.
-      Prefer shell commands for running tests, linting, and git operations.
-      
-      IMPORTANT file workflow: Once a document is opened with open_file, it stays in memory. Use 
-      get_lines/replace_lines/insert_lines/remove_lines to edit, save_file to write, then close_file.
-    tools: ["documents", "shell", "memory"]
-    llm_url: "http://100.90.58.38:8000/v1"
-    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
-    memory_db: "coding"
-    tool_timeout: 60
-    strip_thinking: true
-    store_tool_results: 0
-
-  research:
-    system_prompt: |
-      You are a research assistant specializing in finding and synthesizing information.
-      
-      Use web search and document tools to gather information. Be thorough and cite sources.
-    tools: ["documents", "memory"]
-    llm_url: "http://100.90.58.38:8000/v1"
-    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
-    memory_db: "research"
-    tool_timeout: 45
-    strip_thinking: true
-    store_tool_results: 0
+#
+# Cores are loaded from the cores/ folder
+# Each .yaml file in cores/ defines a core
 
 # Memory API settings
 memory_api:
