@@ -173,6 +173,20 @@ def get_module():
         
         return "\n".join(lines)
     
+    def get_memory_context() -> str:
+        """Get memory tool usage instructions."""
+        return """## Memory Tools
+
+The memory context is automatically included in your system prompt. Use that instead of calling these tools directly:
+
+- **System prompt has {memory}**: Recent conversation context is already injected
+- **search_memories(query)**: Search for specific info in memory (rarely needed)
+- **add_memory(content)**: Save important info to remember long-term
+- **get_recent_context(hours)**: Only use for very recent specific lookups
+
+### Important
+The AI should rely on the automatic memory context in the system prompt rather than manually reading lines with get_recent_context(). Only use search_memories() when looking for specific past information not in recent context."""
+    
     return Module(
         name="memory",
         enrollment=lambda: None,
@@ -183,5 +197,7 @@ def get_module():
             "list_memories": list_memories,
             "get_memory_stats": get_memory_stats,
             "get_recent_context": get_recent_context,
-        }
+        },
+        get_context=get_memory_context,
+        tag="memory"
     )
