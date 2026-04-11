@@ -130,6 +130,13 @@ class CoreManager:
                     daemon=True
                 )
                 instance.thread.start()
+                
+                # Wait for thread to be ready
+                import time
+                for _ in range(20):
+                    if instance.status == "running":
+                        break
+                    time.sleep(0.1)
         else:
             # Simple mode: just record session
             pass
@@ -150,6 +157,7 @@ class CoreManager:
             core = get_core(instance.core_name)
             print(f'[thread] Core created: {core}', file=sys.stderr)
             instance.status = "running"
+            print(f'[thread] Status set to running', file=sys.stderr)
             
             while instance.status == "running":
                 try:
@@ -158,14 +166,18 @@ class CoreManager:
                     continue
                 
                 if msg is None:  # Stop signal
+                    print(f'[thread] Got stop signal', file=sys.stderr)
                     break
                 
+                print(f'[thread] Got message: {msg[:30]}...', file=sys.stderr)
                 try:
                     result = asyncio.run(core.run(msg))
                     output = str(result.output) if result and hasattr(result, 'output') else str(result)
                     instance.output_queue.put(output)
+                    print(f'[thread] Output queued', file=sys.stderr)
                 except Exception as e:
                     instance.output_queue.put(f"Error: {e}")
+                    print(f'[thread] Error: {e}', file=sys.stderr)
                     
         except Exception as e:
             import traceback
