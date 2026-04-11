@@ -152,6 +152,58 @@ async def check_database_exists(name: str) -> dict:
     return {"exists": os.path.exists(db_path), "name": name}
 
 
+class ExecuteSQLRequest(BaseModel):
+    """Request to execute raw SQL."""
+    sql: str
+    params: list | None = None
+
+
+@app.post("/db/execute")
+async def execute_sql(request: ExecuteSQLRequest, db_name: str = Query("default", description="Database name")) -> dict:
+    """Execute raw SQL against the database.
+    
+    WARNING: This is a powerful and potentially dangerous operation.
+    Use only for debugging or direct database inspection.
+    
+    Args:
+        request: SQL statement and optional parameters
+        db_name: Database name (query param)
+        
+    Returns:
+        Query results or row count
+    """
+    import sqlite3
+    
+    db_path = get_db_path(db_name)
+    
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            if request.params:
+                cursor.execute(request.sql, request.params)
+            else:
+                cursor.execute(request.sql)
+            
+            # Check if it's a SELECT query
+            if request.sql.strip().upper().startswith("SELECT"):
+                rows = cursor.fetchall()
+                results = []
+                for row in rows:
+                    results.append(dict(row))
+                return {"type": "select", "rows": results, "count": len(results)}
+            else:
+                conn.commit()
+                return {"type": "execute", "rows_affected": cursor.rowcount}
+                
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/memories")
 async def add_memory(request: AddMemoryRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Add a new memory with optional keywords and properties.
