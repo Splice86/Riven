@@ -12,7 +12,7 @@ _processing = False
 def get_prompt_prefix(core_name: str, session_id: str = None) -> str:
     """Get the prompt prefix with core name and session ID in cyan."""
     if session_id:
-        return f"\033[96mRiven - {core_name} [{session_id[:8]}...]\033[0m"
+        return f"\033[96mRiven - {core_name} [{session_id}]\033[0m"
     return f"\033[96mRiven - {core_name}\033[0m"
 
 
@@ -89,7 +89,7 @@ async def run_repl(core_name: str) -> None:
     print(f"Using core: {display_name}")
     print(f"Tools loaded: {list(core._modules.all().keys())}")
     print(f"Memory DB: {core.db_name}")
-    print(f"Session: {core.get_session_id()[:8]}...")
+    print(f"Session: {session_id}")
     print("Riven agent ready. Type '/exit' to stop, '/clear' to reset session.\n")
     
     while True:
