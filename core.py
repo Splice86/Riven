@@ -199,9 +199,10 @@ class Core:
                                 print("\n🤔 Thinking...", flush=True)
                                 _thinking_printed = True
                         elif hasattr(part, 'content'):
-                            # Stream text content as it arrives
+                            # Stream text content, converting thinking tags for display
+                            text = part.content.replace('<think>', '\nThinking: ').replace('</think>', '')
                             _streamed_text += part.content
-                            print(part.content, end="", flush=True)
+                            print(text, end="", flush=True)
                             
                     elif isinstance(event, PartDeltaEvent):
                         delta = event.delta
@@ -212,9 +213,10 @@ class Core:
                                 if _thinking_printed:
                                     print(delta.content_delta, end="", flush=True)
                         elif hasattr(delta, 'content_delta') and delta.content_delta:
-                            # Stream text delta as it arrives
+                            # Stream text delta, converting thinking tags for display
+                            text = delta.content_delta.replace('<think>', '\nThinking: ').replace('</think>', '')
                             _streamed_text += delta.content_delta
-                            print(delta.content_delta, end="", flush=True)
+                            print(text, end="", flush=True)
                             
                     elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
                         # End of thinking - clear buffer
