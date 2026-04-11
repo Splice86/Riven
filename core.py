@@ -308,7 +308,7 @@ class Core:
                                     "tool",
                                     f"{tr['tool']}: {result}"
                                 )
-                            print(f"[TIMING] storing {len(tool_results)} tool results: {time.perf_counter() - t_tool:.3f}s", flush=True)
+                            
                         # Add newline at end of output
                         print(flush=True)
                         # Return result but don't print - already streamed above
@@ -347,12 +347,8 @@ class Core:
         Returns tuple of (user_prompt, message_history) where message_history
         contains the converted memory context.
         """
-        import time
-        t0 = time.perf_counter()
-        
         # Get context from memory
         context = self._memory.get_context()
-        print(f"[TIMING] _memory.get_context(): {time.perf_counter() - t0:.3f}s", flush=True)
         
         if not context:
             return user_input, []
@@ -376,22 +372,12 @@ class Core:
 
     async def run(self, prompt: str) -> Any:
         """Run the agent with the given prompt."""
-        import time
-        t0 = time.perf_counter()
-        
         # Build prompts first (don't add to memory until success)
-        t1 = time.perf_counter()
         system_prompt = self._build_system_prompt()
-        print(f"[TIMING] _build_system_prompt: {time.perf_counter() - t1:.3f}s", flush=True)
-        
-        t2 = time.perf_counter()
         user_prompt, message_history = self._build_prompt(prompt)
-        print(f"[TIMING] _build_prompt (get memory context): {time.perf_counter() - t2:.3f}s", flush=True)
         
         # Run agent with message history injected
-        t3 = time.perf_counter()
         result = await self._run_with_retry(system_prompt, user_prompt, message_history)
-        print(f"[TIMING] _run_with_retry (LLM call): {time.perf_counter() - t3:.3f}s", flush=True)
         
         # Handle cancelled operation
         if result is None:
@@ -406,11 +392,8 @@ class Core:
             output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
         
         # Add user/assistant to memory after successful run
-        t5 = time.perf_counter()
         self._memory.add_context("user", prompt)
         self._memory.add_context("assistant", output_text)
-        print(f"[TIMING] add_context (2 calls): {time.perf_counter() - t5:.3f}s", flush=True)
-        print(f"[TIMING] TOTAL run(): {time.perf_counter() - t0:.3f}s", flush=True)
         
         return result
 
