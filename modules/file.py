@@ -520,6 +520,16 @@ close_file("main.py")
         if not open_files:
             return instructions + "\n\nNo files currently open"
         
+        # Refresh content from disk for each open file
+        for path in open_files:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        content = f.read()
+                    manager._documents[path] = OpenDocument(content)
+                except Exception:
+                    pass  # Keep cached version if read fails
+        
         # Sort by modification time (oldest first = most recently modified at bottom)
         sorted_files = sorted(open_files, key=lambda p: os.path.getmtime(p))
         
