@@ -9,8 +9,10 @@ from core import get_core, list_cores, get_core_display_name, CONFIG
 _processing = False
 
 
-def get_prompt_prefix(core_name: str) -> str:
-    """Get the prompt prefix with core name in cyan."""
+def get_prompt_prefix(core_name: str, session_id: str = None) -> str:
+    """Get the prompt prefix with core name and session ID in cyan."""
+    if session_id:
+        return f"\033[96mRiven - {core_name} [{session_id[:8]}...]\033[0m"
     return f"\033[96mRiven - {core_name}\033[0m"
 
 
@@ -81,7 +83,8 @@ async def run_repl(core_name: str) -> None:
     
     core = get_core(core_name)
     display_name = get_core_display_name(core_name)
-    prompt_prefix = get_prompt_prefix(display_name)
+    session_id = core.get_session_id()
+    prompt_prefix = get_prompt_prefix(display_name, session_id)
     
     print(f"Using core: {display_name}")
     print(f"Tools loaded: {list(core._modules.all().keys())}")
