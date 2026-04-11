@@ -563,28 +563,32 @@ def get_module():
         # Tool usage instructions
         instructions = """## File Tools Usage
 
+### CRITICAL: Use System Prompt Context
+The open files and their line numbers are automatically included in your system prompt as {file}. 
+You should use this context instead of calling get_lines() or re-opening files.
+
 ### Workflow: Open → Edit → Save → Close
-1. **open_file(path)**: Opens a file, returns content with line numbers
-2. **get_lines(path, start, end)**: Get specific lines from open file
-3. **replace_lines(path, start, end, new_content)**: Replace by line numbers
-4. **insert_lines(path, after_line, new_content)**: Insert after a line
-5. **remove_lines(path, start, end)**: Delete lines by number
-6. **replace_text_at_line(path, line_number, old_text, new_text)**: Replace text within a line
-7. **save_file(path)**: Write changes to disk
-8. **close_file(path)**: Close the file
+1. **open_file(path)**: Opens a file (do this first)
+2. **replace_lines(path, start, end, new_content)**: Replace by line numbers
+3. **insert_lines(path, after_line, new_content)**: Insert after a line
+4. **remove_lines(path, start, end)**: Delete lines by number
+5. **replace_text_at_line(path, line_number, old_text, new_text)**: Replace text within a line
+6. **save_file(path)**: Write changes to disk
+7. **close_file(path)**: Close the file
 
 ### Tips
-- Once a file is opened, it stays in context - don't re-open!
-- Use line numbers from open_file output to target edits
+- Check {file} in system prompt for open file line numbers - don't call get_lines()
+- Don't re-open files - they're already in your context
+- Use line numbers from the system prompt context
 - For replace_text_at_line: copy EXACT text from the file for old_text
-- If "Text not found" error: copy the exact text including whitespace
+- If "Text not found" error: copy the exact text from the system prompt
 - Fuzzy matching: if exact match fails, will search for 95%+ similar match
 - Always save_file after edits before closing
 
 ### Example
 ```
-open_file("main.py")  # Get line numbers first
-replace_lines("main.py", 10, 15, "new content here")
+open_file("main.py")  # File is now in context with line numbers
+replace_lines("main.py", 10, 15, "new content here")  # Use line numbers from {file}
 save_file("main.py")
 close_file("main.py")
 ```"""
@@ -604,7 +608,7 @@ close_file("main.py")
         enrollment=lambda: None,
         functions={
             "open_file": open_file,
-            "get_lines": get_lines,
+            # "get_lines": get_lines,  # Disabled - use {file} context instead
             "replace_lines": replace_lines,
             "insert_lines": insert_lines,
             "remove_lines": remove_lines,
