@@ -52,7 +52,6 @@ system_prompt: |
   
   ## Context
   {time}
-  {memory}
   {file}
 
 tools: ["all"]
