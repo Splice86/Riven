@@ -130,7 +130,12 @@ class DocumentManager:
         return "\n".join(output_lines)
     
     def replace_lines(self, path: str, start: int, end: int, new_content: str) -> str:
-        """Replace a range of lines with new content."""
+        """Replace a range of lines with new content.
+        
+        Note: You must provide correct indentation in new_content. The function
+        does not adjust indentation automatically - match the surrounding
+        code's indentation (e.g., 4 spaces for Python).
+        """
         abs_path = os.path.abspath(path)
         
         if abs_path not in self._documents:
@@ -155,7 +160,12 @@ class DocumentManager:
         return f"Replaced lines {start}-{end} with {len(new_lines)} lines"
     
     def insert_lines(self, path: str, after_line: int, new_content: str) -> str:
-        """Insert new content after a specific line."""
+        """Insert new content after a specific line.
+        
+        Note: You must provide correct indentation in new_content. The function
+        does not adjust indentation automatically - match the surrounding
+        code's indentation (e.g., 4 spaces for Python).
+        """
         abs_path = os.path.abspath(path)
         
         if abs_path not in self._documents:
@@ -176,7 +186,10 @@ class DocumentManager:
         return f"Inserted {len(new_lines)} lines after line {after_line}"
     
     def remove_lines(self, path: str, start: int, end: int) -> str:
-        """Remove a range of lines."""
+        """Remove a range of lines.
+        
+        Note: This removes entire lines only.
+        """
         abs_path = os.path.abspath(path)
         
         if abs_path not in self._documents:
@@ -194,6 +207,55 @@ class DocumentManager:
         doc.content = ''.join(doc.lines)
         
         return f"Removed lines {start}-{end} from {os.path.basename(path)} ({num_removed} lines)"
+    
+    def replace_text_at_line(
+        self,
+        path: str,
+        line_number: int,
+        old_text: str,
+        new_text: str,
+        use_regex: bool = False
+    ) -> str:
+        """Replace text at a specific line using pattern matching.
+        
+        Args:
+            path: Path to the file.
+            line_number: Line number to operate on (1-indexed).
+            old_text: Text pattern to find (literal or regex if use_regex=True).
+            new_text: Replacement text.
+            use_regex: If True, treat old_text as a regex pattern.
+            
+        Returns:
+            Confirmation message with what was replaced.
+        """
+        import re
+        
+        abs_path = os.path.abspath(path)
+        
+        if abs_path not in self._documents:
+            return f"Error: {path} not open. Use open_file first."
+        
+        doc = self._documents[abs_path]
+        
+        if line_number < 1 or line_number > len(doc.lines):
+            return f"Error: invalid line_number {line_number}"
+        
+        line = doc.lines[line_number - 1]
+        
+        if use_regex:
+            match = re.search(old_text, line)
+            if not match:
+                return f"No match found for regex: {old_text}"
+            new_line = re.sub(old_text, new_text, line)
+        else:
+            if old_text not in line:
+                return f"Text not found: {old_text}"
+            new_line = line.replace(old_text, new_text, 1)
+        
+        doc.lines[line_number - 1] = new_line
+        doc.content = ''.join(doc.lines)
+        
+        return f"Replaced at line {line_number}"
     
     def save(self, path: str) -> str:
         """Save an open document's in-memory changes to disk."""
@@ -317,6 +379,27 @@ def get_module():
         """
         return manager.remove_lines(path, start, end)
     
+    async def replace_text_at_line(
+        path: str,
+        line_number: int,
+        old_text: str,
+        new_text: str,
+        use_regex: bool = False
+    ) -> str:
+        """Replace text at a specific line using pattern matching.
+        
+        Args:
+            path: Path to the file.
+            line_number: Line number to operate on (1-indexed).
+            old_text: Text pattern to find (literal or regex if use_regex=True).
+            new_text: Replacement text.
+            use_regex: If True, treat old_text as a regex pattern.
+            
+        Returns:
+            Confirmation message with what was replaced.
+        """
+        return manager.replace_text_at_line(path, line_number, old_text, new_text, use_regex)
+    
     async def save_file(path: str) -> str:
         """Save an open file's in-memory changes to disk.
         
@@ -373,6 +456,7 @@ def get_module():
             "replace_lines": replace_lines,
             "insert_lines": insert_lines,
             "remove_lines": remove_lines,
+            "replace_text_at_line": replace_text_at_line,
             "save_file": save_file,
             "save_all_files": save_all_files,
             "close_file": close_file,
