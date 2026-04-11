@@ -17,6 +17,7 @@ RESET = "\033[0m"
 
 # Global to store the last built system prompt (for debug/diagnostics)
 _current_system_prompt: str = ""
+_in_thinking: bool = False  # Track if we're inside <think> tags (for color output)
 from pydantic_ai import Agent
 from pydantic_ai import AgentStreamEvent, AgentRunResultEvent
 from pydantic_ai.messages import (
@@ -192,6 +193,7 @@ class Core:
         
         # Buffers for streaming content
         _thinking_buffer = ""
+        global _in_thinking
         _in_thinking = False  # Track if we're inside <think> tags
         _streamed_text = ""  # Track text already streamed
         
