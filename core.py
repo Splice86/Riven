@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from typing import Any
 
 import requests
@@ -108,7 +109,8 @@ class Core:
         retry_delay: float = 1.0,
         db_name: str = None,
         tools: list = None,
-        tool_timeout: int = 20
+        tool_timeout: int = 20,
+        strip_thinking: bool = False
     ):
         # Load from config if provided
         if config:
@@ -119,6 +121,7 @@ class Core:
             self.db_name = config.get('memory_db', DEFAULT_DB)
             self._tool_filter = config.get('tools', None)
             self.tool_timeout = config.get('tool_timeout', 20)
+            self.strip_thinking = config.get('strip_thinking', False)
         else:
             self.model = model or LLM_MODEL
             self.llm_url = llm_url or LLM_URL
@@ -127,6 +130,7 @@ class Core:
             self.db_name = db_name or DEFAULT_DB
             self._tool_filter = tools
             self.tool_timeout = tool_timeout
+            self.strip_thinking = strip_thinking
         
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -328,7 +332,11 @@ class Core:
         
         # Strip thinking tags from output before storing in memory
         output_text = str(result.output)
-        output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
+        if self.strip_thinking:
+            # Use regex to remove everything between thinking tags
+            output_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
+        else:
+            output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
         
         # Add user/assistant to memory after successful run
         self._memory.add_context("user", prompt)

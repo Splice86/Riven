@@ -20,6 +20,7 @@ cores:
     llm_model: "nvidia/MiniMax-M2.5-NVFP4"
     memory_db: "riven"
     tool_timeout: 30
+    strip_thinking: true  # Remove thinking tags + content from memory
 
   coding:
     system_prompt: |
@@ -32,6 +33,7 @@ cores:
     llm_model: "nvidia/MiniMax-M2.5-NVFP4"
     memory_db: "coding"
     tool_timeout: 60
+    strip_thinking: true
 
   research:
     system_prompt: |
@@ -43,6 +45,7 @@ cores:
     llm_model: "nvidia/MiniMax-M2.5-NVFP4"
     memory_db: "research"
     tool_timeout: 45
+    strip_thinking: true
 
 # Memory API settings
 memory_api:
