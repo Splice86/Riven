@@ -425,6 +425,10 @@ class Context:
         summaries = []
         for mem in results:
             props = mem.get("properties", {})
+            # Skip if already summarized (prevents re-clustering)
+            if props.get("was_summarized") == "true":
+                continue
+            
             summaries.append({
                 "id": mem["id"],
                 "role": props.get("role", "summary"),
@@ -432,7 +436,9 @@ class Context:
                 "created_at": mem["created_at"],
                 "properties": {
                     "token_count": props.get("token_count", "0"),
-                    "summary_level": props.get("summary_level")
+                    "summary_level": props.get("summary_level"),
+                    "was_summarized": props.get("was_summarized", ""),
+                    "session": props.get("session", "")
                 }
             })
         
