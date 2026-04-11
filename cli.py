@@ -14,7 +14,7 @@ def get_prompt_prefix(core_name: str) -> str:
     return f"\033[96mRiven - {core_name}\033[0m"
 
 
-TAGLINE = "⬡ ̴S̵Y̷N̸T̷H̵W̶A̵V̷E̷ ̸◆̶ N̴E̸O̴N̷ ̵D̶R̵E̴A̷M̸S̴ ⬡"
+TAGLINE = "⬡ ̸S̵I̷G̴N̷A̵L̷S̴ ̷◆̷ ̷T̸O̶ ̵T̶H̷E̴ ̷V̶O̴I̵D̸ ⬡"
 
 
 def print_banner() -> None:
