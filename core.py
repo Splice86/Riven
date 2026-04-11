@@ -137,7 +137,7 @@ class Core:
         self._cancelled = False
 
         self._modules = ModuleRegistry()
-        self._memory = MemoryClient(db_name=self.db_name)
+        self._memory = MemoryClient(db_name=self.db_name, base_url=MEMORY_API_URL)
         
         # Register modules based on tool filter
         self._register_modules()
