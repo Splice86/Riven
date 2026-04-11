@@ -153,6 +153,70 @@ def get_module():
         count = resp.json().get("count", 0)
         return f"Total memories: {count}"
     
+    async def add_link(source_id: int, target_id: int, link_type: str = "related_to") -> str:
+        """Create a link between two memories.
+        
+        Args:
+            source_id: ID of the source memory (the one doing the linking)
+            target_id: ID of the target memory (the one being linked to)
+            link_type: Type of link (e.g., "related_to", "summary_of", "follows")
+            
+        Returns:
+            Confirmation message with link details
+        """
+        import requests
+        resp = requests.post(
+            f"{MEMORY_API_URL}/memories/link",
+            params={"db_name": DEFAULT_DB},
+            json={"source_id": source_id, "target_id": target_id, "link_type": link_type}
+        )
+        result = resp.json()
+        return f"Linked memory #{source_id} -> #{target_id} ({link_type})"
+    
+    async def delete_memory(memory_id: int) -> str:
+        """Delete a memory by its ID.
+        
+        Args:
+            memory_id: The numeric ID of the memory to delete
+            
+        Returns:
+            Confirmation message
+        """
+        import requests
+        resp = requests.delete(
+            f"{MEMORY_API_URL}/memories/{memory_id}",
+            params={"db_name": DEFAULT_DB}
+        )
+        if resp.status_code == 404:
+            return f"Memory #{memory_id} not found"
+        return f"Deleted memory #{memory_id}"
+    
+    async def update_memory(
+        memory_id: int,
+        properties: Optional[dict[str, str]] = None,
+        keywords: Optional[list[str]] = None
+    ) -> str:
+        """Update a memory's properties and/or keywords.
+        
+        Args:
+            memory_id: The numeric ID of the memory to update
+            properties: Optional dict of key-value properties to update
+            keywords: Optional list of keywords to replace existing keywords
+            
+        Returns:
+            Confirmation message with updated memory info
+        """
+        import requests
+        resp = requests.put(
+            f"{MEMORY_API_URL}/memories/{memory_id}",
+            params={"db_name": DEFAULT_DB},
+            json={"properties": properties, "keywords": keywords}
+        )
+        if resp.status_code == 404:
+            return f"Memory #{memory_id} not found"
+        result = resp.json()
+        return f"Updated memory #{memory_id}"
+    
     async def get_recent_context(hours: int = 24, limit: int = 5) -> str:
         """Get recent memories for context."""
         import requests
@@ -182,6 +246,9 @@ def get_module():
             "get_memory": get_memory,
             "list_memories": list_memories,
             "get_memory_stats": get_memory_stats,
+            "add_link": add_link,
+            "delete_memory": delete_memory,
+            "update_memory": update_memory,
             "get_recent_context": get_recent_context,
         }
     )
