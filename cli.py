@@ -60,7 +60,7 @@ def print_banner() -> None:
         # Code Hammer subtitle - inline with last banner line, right-justified
         last_line = lines[-1] if lines and lines[-1].strip() else (lines[-2] if len(lines) > 1 else lines[0])
         padding = max(0, 40 - len(last_line))
-        print(f"{last_line}{' ' * (padding + 4)}{RED}CODE HAMMER{RESET}")
+        print(f"{last_line}{' ' * padding}{RED}CODE HAMMER{RESET}")
         
         # Tagline
         print(f"{CYAN}┌{'─' * 40}┐{RESET}")
