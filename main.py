@@ -35,8 +35,8 @@ async def main():
             if not prompt:
                 continue
             
-            result = await core.run(prompt)
-            print(f"\n{result.output}\n")
+            # Result is already streamed to terminal, just run it
+            await core.run(prompt)
             
         except KeyboardInterrupt:
             print("\nGoodbye!")

@@ -173,9 +173,10 @@ class Core:
         pending_tool = None  # Buffer for tool call awaiting result
         message_history = message_history or []
         
-        # Buffer for streaming thinking content
+        # Buffers for streaming content
         _thinking_buffer = ""
         _thinking_printed = False
+        _streamed_text = ""  # Track text already streamed
         
         for attempt in range(self.max_retries):
             try:
@@ -195,6 +196,7 @@ class Core:
                                 _thinking_printed = True
                         elif hasattr(part, 'content'):
                             # Stream text content as it arrives
+                            _streamed_text += part.content
                             print(part.content, end="", flush=True)
                             
                     elif isinstance(event, PartDeltaEvent):
@@ -207,6 +209,7 @@ class Core:
                                     print(delta.content_delta, end="", flush=True)
                         elif hasattr(delta, 'content_delta') and delta.content_delta:
                             # Stream text delta as it arrives
+                            _streamed_text += delta.content_delta
                             print(delta.content_delta, end="", flush=True)
                             
                     elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
@@ -254,12 +257,13 @@ class Core:
                             print(f"  ... ({len(lines) - 10} more lines, {len(content_str)} total chars)", flush=True)
                         
                     elif isinstance(event, AgentRunResultEvent):
-                        # Final result - store tool results in memory
+                        # Final result - store tool results in memory (don't print, already streamed)
                         for tr in tool_results:
                             self._memory.add_context(
                                 "tool",
                                 f"{tr['tool']}: {tr['result']}"
                             )
+                        # Return result but don't print - already streamed above
                         return event.result
                         
             except Exception as e:
