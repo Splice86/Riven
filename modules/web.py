@@ -83,6 +83,91 @@ def fetch_page_links(url: str) -> str:
         return f"Error: {e}"
 
 
+def web_search(query: str, num_results: int = 10) -> str:
+    """Search the web using DuckDuckGo lite.
+    
+    Args:
+        query: Search query
+        num_results: Number of results to return (default: 10)
+        
+    Returns:
+        Search results with titles and URLs
+    """
+    import re
+    try:
+        # Use DuckDuckGo HTML version
+        url = f"https://lite.duckduckgo.com/lite/?q={query.replace(' ', '+')}"
+        result = subprocess.run(
+            ['lynx', '-dump', '-nolist', '-width=200', url],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            return f"Error searching: {result.stderr}"
+        
+        lines = result.stdout.strip().split('\n')
+        results = []
+        
+        # Parse results: numbered entries followed by description, then URL
+        current_result = None
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Skip header and navigation
+            if not line:
+                continue
+            if 'DuckDuckGo' in line or 'Next Page' in line:
+                continue
+            if line.startswith('__'):
+                continue
+            
+            # Match numbered results: "1. Title" or "  1. Title"
+            match = re.match(r'^\s*(\d+)\.\s+(.+)$', line)
+            if match:
+                if current_result and current_result not in results:
+                    results.append(current_result)
+                # Start new result
+                title = match.group(2).strip()
+                current_result = title
+                continue
+            
+            # If we have a current result, append description lines
+            if current_result:
+                # URL lines (start with http)
+                if line.startswith(('http://', 'https://')):
+                    current_result += f" | {line}"
+                    if current_result not in results:
+                        results.append(current_result)
+                    current_result = None
+                # Description lines
+                elif len(line) > 10 and 'duckduckgo' not in line.lower():
+                    current_result += f" - {line}"
+            
+            if len(results) >= num_results:
+                break
+        
+        # Add last result if not added
+        if current_result and current_result not in results:
+            results.append(current_result)
+        
+        if not results:
+            return f"No results found for: {query}"
+        
+        output = [f"Search results for: {query}", ""]
+        for i, r in enumerate(results, 1):
+            output.append(f"{i}. {r}")
+        
+        return '\n'.join(output)
+    
+    except subprocess.TimeoutExpired:
+        return "Error: Search timeout"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def get_module() -> Module:
     """Create the web module."""
     return Module(
@@ -91,5 +176,6 @@ def get_module() -> Module:
         functions={
             "fetch_page": fetch_page,
             "fetch_page_links": fetch_page_links,
+            "web_search": web_search,
         }
     )
