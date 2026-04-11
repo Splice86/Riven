@@ -304,7 +304,12 @@ class Context:
         llm = SummarizerLLM()
         summary_text = llm.summarize(combined)
         
-        total_tokens = sum(m["token_count"] for m in memories)
+        total_tokens = 0
+        for m in memories:
+            try:
+                total_tokens += int(m.get("properties", {}).get("token_count", "0"))
+            except (ValueError, TypeError):
+                pass
         created_at = datetime.now(timezone.utc).isoformat()
         
         # Get session from first memory's properties if not provided
