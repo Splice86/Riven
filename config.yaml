@@ -1,33 +1,50 @@
 # Riven Configuration
 # This file is gitignored - add local overrides to config_local.yaml
 
+# =============================================================================
+# Agent Cores Configuration
+# =============================================================================
+# Each core defines: system_prompt, tools, llm, and memory_db
+# tools: list of module names to load, or ["all"] for all available tools
+
+cores:
+  default:
+    system_prompt: |
+      You are a helpful AI assistant.
+      
+      When reading files, use the open_document tool instead of shell commands like cat, less, or head. 
+      The file open tool provides better formatting and line numbering. Only use shell commands for 
+      executing programs or when you specifically need shell features (pipes, redirects, etc.).
+    tools: ["all"]
+    llm_url: "http://100.90.58.38:8000/v1"
+    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
+    memory_db: "riven"
+    tool_timeout: 30
+
+  coding:
+    system_prompt: |
+      You are an expert software developer.
+      
+      Focus on writing clean, maintainable code. Use the file tools to read and write code.
+      Prefer shell commands for running tests, linting, and git operations.
+    tools: ["documents", "shell", "memory"]
+    llm_url: "http://100.90.58.38:8000/v1"
+    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
+    memory_db: "coding"
+    tool_timeout: 60
+
+  research:
+    system_prompt: |
+      You are a research assistant specializing in finding and synthesizing information.
+      
+      Use web search and document tools to gather information. Be thorough and cite sources.
+    tools: ["documents", "memory"]
+    llm_url: "http://100.90.58.38:8000/v1"
+    llm_model: "nvidia/MiniMax-M2.5-NVFP4"
+    memory_db: "research"
+    tool_timeout: 45
+
 # Memory API settings
 memory_api:
-  url: "http://192.168.1.11:8030"
+  url: "http://100.90.58.38:8030"
   db_name: "riven"
-
-# LLM settings
-llm:
-  url: "http://192.168.1.11:8010"
-  api_key: "sk-dummy"
-  model: "llama3"
-  # Context window size (leave room for system prompt + tools)
-  # llama3 = 8k, llama3.1 = 128k
-  context_window: 128000
-
-# Context / Summarization settings
-context:
-  # Max tokens in active context before triggering summarization
-  max_tokens: 32000
-  # Fallback: max message count (used if token counting fails or for quick checks)
-  max_messages: 50
-  # Temporal clustering: new cluster if gap > this many minutes
-  cluster_gap_minutes: 30
-  # Don't summarize messages from the last N minutes (active session)
-  cluster_exclude_minutes: 30
-
-# Embedding settings
-embedding:
-  model_size: "27b"  # 270m, 0.6b, or 27b
-  force_cpu: true
-  cache_db: "memory/embeddings_cache.db"

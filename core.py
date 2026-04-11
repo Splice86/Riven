@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 import requests
+import yaml
 from pydantic_ai import Agent
 from pydantic_ai import AgentStreamEvent, AgentRunResultEvent
 from pydantic_ai.messages import (
@@ -16,6 +17,11 @@ from pydantic_ai.messages import (
     ModelResponse,
     UserPromptPart,
     TextPart,
+    PartStartEvent,
+    PartEndEvent,
+    PartDeltaEvent,
+    ThinkingPart,
+    ThinkingPartDelta,
 )
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -23,19 +29,38 @@ from pydantic_ai.tools import Tool as PydanticTool
 from openai import AsyncOpenAI
 
 from modules import ModuleRegistry, get_all_modules
+from tools import create_tools
 
 logger = logging.getLogger(__name__)
 
-MEMORY_API_URL = os.environ.get("MEMORY_API_URL", "http://127.0.0.1:8030")
+# Load configuration
+def _load_config() -> dict:
+    """Load config from yaml files."""
+    config = {}
+    
+    # Try config_local.yaml first (gitignored, for local overrides)
+    for config_file in ['config_local.yaml', 'config.yaml']:
+        if os.path.exists(config_file):
+            with open(config_file) as f:
+                loaded = yaml.safe_load(f)
+                if loaded:
+                    config.update(loaded)
+    
+    return config
 
-# Config - try config.py first, fallback to defaults
+CONFIG = _load_config()
+
+
+# Legacy env/import fallback
+MEMORY_API_URL = os.environ.get("MEMORY_API_URL", CONFIG.get('memory_api', {}).get('url', "http://127.0.0.1:8030"))
+
 try:
     from config import LLM_URL, LLM_API_KEY, LLM_MODEL, DEFAULT_DB, MAX_OUTPUT_LINES
 except ImportError:
-    LLM_URL = "http://127.0.0.1:8000/v1/"
-    LLM_API_KEY = "sk-dummy"
-    LLM_MODEL = "nvidia/MiniMax-M2.5-NVFP4"
-    DEFAULT_DB = "default"
+    LLM_URL = CONFIG.get('llm', {}).get('url', "http://127.0.0.1:8000/v1/")
+    LLM_API_KEY = CONFIG.get('llm', {}).get('api_key', "sk-dummy")
+    LLM_MODEL = CONFIG.get('llm', {}).get('model', "nvidia/MiniMax-M2.5-NVFP4")
+    DEFAULT_DB = CONFIG.get('memory_api', {}).get('db_name', "default")
     MAX_OUTPUT_LINES = 1000
 
 
@@ -67,32 +92,61 @@ class MemoryClient:
 
 
 class Core:
-    """Simple agent using pydantic_ai with vllm backend."""
+    """Agent core using pydantic_ai with vllm backend.
+    
+    Can be initialized with a config dict (from cores.yaml) or individual params.
+    """
 
     def __init__(
         self,
+        config: dict = None,
         model: str = None,
         system_prompt: str = None,
         llm_url: str = None,
         llm_api_key: str = None,
         max_retries: int = 3,
         retry_delay: float = 1.0,
-        db_name: str = None
+        db_name: str = None,
+        tools: list = None,
+        tool_timeout: int = 20
     ):
-        self.model = model or LLM_MODEL
-        self.llm_url = llm_url or LLM_URL
-        self.llm_api_key = llm_api_key or LLM_API_KEY
+        # Load from config if provided
+        if config:
+            self.model = config.get('llm_model') or config.get('llm_model', LLM_MODEL)
+            self.llm_url = config.get('llm_url', LLM_URL)
+            self.llm_api_key = config.get('llm_api_key', LLM_API_KEY)
+            self.system_prompt = config.get('system_prompt', '')
+            self.db_name = config.get('memory_db', DEFAULT_DB)
+            self._tool_filter = config.get('tools', None)
+            self.tool_timeout = config.get('tool_timeout', 20)
+        else:
+            self.model = model or LLM_MODEL
+            self.llm_url = llm_url or LLM_URL
+            self.llm_api_key = llm_api_key or LLM_API_KEY
+            self.system_prompt = system_prompt or ""
+            self.db_name = db_name or DEFAULT_DB
+            self._tool_filter = tools
+            self.tool_timeout = tool_timeout
+        
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.db_name = db_name or DEFAULT_DB
-        self.system_prompt = system_prompt or ""
 
         self._modules = ModuleRegistry()
         self._memory = MemoryClient(db_name=self.db_name)
         
-        # Auto-register all discovered modules
-        for module in get_all_modules():
-            self._modules.register(module)
+        # Register modules based on tool filter
+        self._register_modules()
+    
+    def _register_modules(self) -> None:
+        """Register modules, optionally filtering by tool list."""
+        all_modules = get_all_modules()
+        
+        for module in all_modules:
+            # Handle "all" case
+            if self._tool_filter is None or 'all' in self._tool_filter:
+                self._modules.register(module)
+            elif module.name in self._tool_filter:
+                self._modules.register(module)
 
     def _create_agent(self, system_prompt: str) -> Agent:
         """Create a pydantic_ai Agent."""
@@ -102,13 +156,15 @@ class Core:
         
         # Get functions from registered modules
         module_funcs = self._modules.get_functions()
-        tools = [PydanticTool(func) for _, func, _ in module_funcs] if module_funcs else []
+        tools = create_tools(module_funcs, self.tool_timeout)
         
         return Agent(
             model=model,
             system_prompt=system_prompt,
             tools=tools
         )
+
+    # Remove old _wrap_tool method - now in tools.py
 
     async def _run_with_retry(self, system_prompt: str, prompt: str, message_history: list[ModelMessage] = None) -> Any:
         """Run agent with streaming events for real-time tool output."""
@@ -117,6 +173,10 @@ class Core:
         pending_tool = None  # Buffer for tool call awaiting result
         message_history = message_history or []
         
+        # Buffer for streaming thinking content
+        _thinking_buffer = ""
+        _thinking_printed = False
+        
         for attempt in range(self.max_retries):
             try:
                 agent = self._create_agent(system_prompt)
@@ -124,8 +184,42 @@ class Core:
                 # Use run_stream_events() for real-time tool output
                 # Pass message_history to inject our memory context
                 async for event in agent.run_stream_events(prompt, message_history=message_history):
-                    if isinstance(event, FunctionToolCallEvent):
+                    # Handle thinking/reasoning content
+                    if isinstance(event, PartStartEvent):
+                        part = event.part
+                        if isinstance(part, ThinkingPart):
+                            # Start of thinking - print thinking header
+                            _thinking_buffer = part.content
+                            if _thinking_buffer:
+                                print("\n🤔 Thinking...", flush=True)
+                                _thinking_printed = True
+                        elif hasattr(part, 'content'):
+                            # Stream text content as it arrives
+                            print(part.content, end="", flush=True)
+                            
+                    elif isinstance(event, PartDeltaEvent):
+                        delta = event.delta
+                        if isinstance(delta, ThinkingPartDelta):
+                            # Streaming thinking content
+                            if delta.content_delta:
+                                _thinking_buffer += delta.content_delta
+                                if _thinking_printed:
+                                    print(delta.content_delta, end="", flush=True)
+                        elif hasattr(delta, 'content_delta') and delta.content_delta:
+                            # Stream text delta as it arrives
+                            print(delta.content_delta, end="", flush=True)
+                            
+                    elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
+                        # End of thinking - clear buffer
+                        _thinking_buffer = ""
+                        _thinking_printed = False
+                        # Add newline after thinking output
+                        print(flush=True)
+                        
+                    elif isinstance(event, FunctionToolCallEvent):
                         # Buffer tool call - will print with result
+                        # Add newline before tool output for clean separation
+                        print(flush=True)
                         args = event.part.args
                         tool_name = event.part.tool_name
                         pending_tool = {"name": tool_name, "args": args}
@@ -235,41 +329,28 @@ class Core:
         return result
 
 
-async def main():
-    """Interactive REPL for the agent."""
-    system_prompt = """You are a helpful AI assistant.
-
-When reading files, use the open_document tool instead of shell commands like cat, less, or head. 
-The file open tool provides better formatting and line numbering. Only use shell commands for 
-executing programs or when you specifically need shell features (pipes, redirects, etc.)."""
-
-    core = Core()
+def get_core(name: str = "default") -> Core:
+    """Factory function to create a core by name from config.
     
-    print("Riven agent ready. Type 'quit' or 'exit' to stop.\n")
+    Args:
+        name: Name of the core in config (default: "default")
     
-    while True:
-        try:
-            prompt = input("> ").strip()
-            
-            if prompt.lower() in ('quit', 'exit'):
-                print("Goodbye!")
-                break
-            
-            if not prompt:
-                continue
-            
-            result = await core.run(prompt)
-            print(f"\n{result.output}\n")
-            
-        except KeyboardInterrupt:
-            print("\nGoodbye!")
-            break
-        except Exception as e:
-            print(f"Error: {e}\n")
+    Returns:
+        Configured Core instance
+    
+    Raises:
+        ValueError: If core name not found in config
+    """
+    cores = CONFIG.get('cores', {})
+    
+    if name not in cores:
+        raise ValueError(f"Core '{name}' not found in config. Available: {list(cores.keys())}")
+    
+    return Core(config=cores[name])
 
 
-if __name__ == "__main__":
-    # Suppress HTTP request logging from httpx
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    asyncio.run(main())
+def list_cores() -> list[str]:
+    """List available core names from config."""
+    return list(CONFIG.get('cores', {}).keys())
+
+

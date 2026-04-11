@@ -1,0 +1,52 @@
+"""Main entry point for Riven agent."""
+
+import asyncio
+import logging
+
+from core import get_core, list_cores
+
+
+async def main():
+    """Interactive REPL for the agent."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Riven AI Agent")
+    parser.add_argument(
+        "--core", "-c",
+        default="default",
+        help=f"Core to use (default: default). Available: {list_cores()}"
+    )
+    args = parser.parse_args()
+    
+    core = get_core(args.core)
+    print(f"Using core: {args.core}")
+    print(f"Tools loaded: {list(core._modules.all().keys())}")
+    print(f"Memory DB: {core.db_name}")
+    print("Riven agent ready. Type 'quit' or 'exit' to stop.\n")
+    
+    while True:
+        try:
+            prompt = input("> ").strip()
+            
+            if prompt.lower() in ('quit', 'exit'):
+                print("Goodbye!")
+                break
+            
+            if not prompt:
+                continue
+            
+            result = await core.run(prompt)
+            print(f"\n{result.output}\n")
+            
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"Error: {e}\n")
+
+
+if __name__ == "__main__":
+    # Suppress HTTP request logging from httpx
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    asyncio.run(main())
