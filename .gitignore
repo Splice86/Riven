@@ -19,3 +19,9 @@ venv/
 # Local config overrides
 config_local.yaml
 memory/config_local.yaml
+
+# Debug files
+debug_context_*.txt
+
+# Environment
+.env
