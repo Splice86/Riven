@@ -14,7 +14,7 @@ def get_prompt_prefix(core_name: str) -> str:
     return f"\033[96mRiven - {core_name}\033[0m"
 
 
-TAGLINE = "/// S̷E̴G̵F̶A̷U̷L̶T̶ ///"
+TAGLINE = "⬡ ̷S̴E̵G̷F̸A̶U̷L̵T̴ ̸/// ̷C̴O̵R̷E̸ ̷D̴U̶M̵P̷ ⬡"
 
 
 def print_banner() -> None:
@@ -59,7 +59,7 @@ def print_banner() -> None:
         
         # Tagline
         print(f"{CYAN}┌{'─' * 40}┐{RESET}")
-        print(f"{CYAN}│{RESET}  {MAGENTA}{TAGLINE}{CYAN}{' ' * (40 - len(TAGLINE) - 4)}{RESET}{CYAN}│{RESET}")
+        print(f"{CYAN}│{RESET}{MAGENTA}        {TAGLINE}{CYAN}{' ' * (40 - len(TAGLINE))}{RESET}{CYAN}│{RESET}")
         print(f"{CYAN}└{'─' * 40}┘{RESET}")
         
     except ImportError:
