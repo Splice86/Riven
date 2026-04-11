@@ -28,3 +28,6 @@ debug_context_*.txt
 
 # Launch script with local IPs
 launch.sh
+
+# Secrets (API keys, endpoints)
+secrets.yaml

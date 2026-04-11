@@ -28,8 +28,8 @@ system_prompt: |
   {file}
 
 tools: ["all"]
-llm_url: "http://127.0.0.1:8000/v1"
-llm_model: "nvidia/MiniMax-M2.5-NVFP4"
+llm_url: "$ALTERNATE_LLM_URL"
+llm_model: "$ALTERNATE_LLM_MODEL"
 memory_db: "chaos"
 tool_timeout: 120
 strip_thinking: true

@@ -62,6 +62,45 @@ def _load_config() -> dict:
 CONFIG = _load_config()
 
 
+def _load_secrets() -> dict:
+    """Load secrets from secrets.yaml (gitignored)."""
+    secrets_file = "secrets.yaml"
+    if os.path.exists(secrets_file):
+        with open(secrets_file) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+SECRETS = _load_secrets()
+
+
+def _resolve_core_config(core_config: dict) -> dict:
+    """Resolve $PRIMARY_* and $ALTERNATE_* placeholders in core config."""
+    resolved = core_config.copy()
+    
+    primary = SECRETS.get('llm', {}).get('primary', {})
+    alternate = SECRETS.get('llm', {}).get('alternate', {})
+    
+    for key, value in resolved.items():
+        if isinstance(value, str):
+            if value == "$PRIMARY_LLM_URL":
+                resolved[key] = primary.get('url', "http://127.0.0.1:8000/v1")
+            elif value == "$PRIMARY_LLM_MODEL":
+                resolved[key] = primary.get('model', "nvidia/MiniMax-M2.5-NVFP4")
+            elif value == "$PRIMARY_LLM_API_KEY":
+                resolved[key] = primary.get('api_key', "sk-dummy")
+            elif value == "$ALTERNATE_LLM_URL":
+                resolved[key] = alternate.get('url', "http://127.0.0.1:8000/v1")
+            elif value == "$ALTERNATE_LLM_MODEL":
+                resolved[key] = alternate.get('model', "nvidia/MiniMax-M2.5-NVFP4")
+            elif value == "$ALTERNATE_LLM_API_KEY":
+                resolved[key] = alternate.get('api_key', "sk-dummy")
+        elif isinstance(value, dict):
+            resolved[key] = _resolve_core_config(value)
+    
+    return resolved
+
+
 # Legacy env/import fallback
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", CONFIG.get('memory_api', {}).get('url', "http://127.0.0.1:8030"))
 LLM_URL = os.environ.get("LLM_URL", CONFIG.get('llm', {}).get('url', "http://127.0.0.1:8000/v1/"))
@@ -510,6 +549,8 @@ def _load_cores() -> dict:
             core_config = yaml.safe_load(f)
             if core_config and 'name' in core_config:
                 core_name = core_config.pop('name')
+                # Resolve placeholders from secrets
+                core_config = _resolve_core_config(core_config)
                 cores[core_name] = core_config
     
     return cores
