@@ -533,9 +533,14 @@ class Context:
             if len(to_summarize) < 2:
                 break
             
-            # Check if we'd drop below min_live_tokens after summarizing this group
+            # Check remaining tokens after this summarization
             group_tokens = sum(int(m.get("properties", {}).get("token_count", "0")) for m in to_summarize)
-            if current_tokens - group_tokens < min_live_tokens:
+            remaining_tokens = current_tokens - group_tokens
+            
+            # Only enforce min_live if there will be more groups to process after this
+            # If this is the last group and we're above target, allow it
+            more_groups = len(groups) > 1
+            if more_groups and remaining_tokens < min_live_tokens:
                 break
             
             # Summarize these at the specified level
