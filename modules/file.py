@@ -80,45 +80,35 @@ class DocumentManager:
         show_line_numbers: bool = True,
         max_lines: Optional[int] = None
     ) -> str:
-        """Open a document, add to context, and display content.
+        """Open a document and add to context.
         
-        Once opened, the file stays in memory until explicitly closed.
+        Once opened, the file content is available in the system prompt.
         Use get_lines, replace_lines, insert_lines, or remove_lines to modify.
         Use save_file to write changes to disk.
         
         Args:
             path: Path to the file
-            show_line_numbers: Include line numbers in output (default: True)
-            max_lines: Truncate output to N lines (None for all, 200 for auto-truncate)
+            show_line_numbers: Deprecated, kept for compatibility
+            max_lines: Deprecated, kept for compatibility
             
         Returns:
-            Document content with line numbers (or just confirmation if show_line_numbers=False)
+            Confirmation message
         """
         abs_path = os.path.abspath(path)
         
         if not os.path.exists(abs_path):
             return f"Error: File {abs_path} not found"
         
-        if abs_path in self._documents and not show_line_numbers:
-            # Already open, just return content without re-reading
-            doc = self._documents[abs_path]
-            content = doc.content
-        else:
-            try:
-                with open(abs_path, 'r') as f:
-                    content = f.read()
-            except Exception as e:
-                return f"Error reading {abs_path}: {e}"
-            
-            self._documents[abs_path] = OpenDocument(path=abs_path, content=content)
+        try:
+            with open(abs_path, 'r') as f:
+                content = f.read()
+        except Exception as e:
+            return f"Error reading {abs_path}: {e}"
         
+        self._documents[abs_path] = OpenDocument(path=abs_path, content=content)
         doc = self._documents[abs_path]
         
-        # Format with line numbers
-        if show_line_numbers:
-            return self._format_with_lines(doc, max_lines)
-        else:
-            return f"Opened {abs_path} ({len(doc.lines)} lines)"
+        return f"Opened {os.path.basename(abs_path)} ({len(doc.lines)} lines). File content is now in system prompt."
     
     def _format_with_lines(self, doc: OpenDocument, max_lines: Optional[int] = None) -> str:
         """Format document content with line numbers."""
