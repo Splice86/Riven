@@ -271,6 +271,18 @@ class CoreManager:
         
         return {"message": f"Session {session_id} stopped", "ok": True}
     
+    def get_session(self, session_id: str) -> Optional[Dict]:
+        """Get session info by ID."""
+        with self._lock:
+            inst = self._instances.get(session_id)
+            if inst:
+                return {
+                    "session_id": inst.session_id,
+                    "core_name": inst.core_name,
+                    "status": inst.status,
+                }
+        return None
+    
     def list_sessions(self) -> List[Dict]:
         """List running sessions."""
         with self._lock:
@@ -327,6 +339,11 @@ def receive(session_id: str, timeout: float = 0.1) -> List[str]:
 def list_sessions() -> List[Dict]:
     """List running sessions."""
     return get_manager().list_sessions()
+
+
+def get_session(session_id: str) -> Optional[Dict]:
+    """Get session info by ID."""
+    return get_manager().get_session(session_id)
 
 
 def get_current_session() -> Optional[str]:

@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from core_manager import get_manager, CoreManager
+from core import get_core
 
 
 # ============== MODELS ==============
@@ -75,17 +76,48 @@ def delete_session(session_id: str):
 
 @app.post("/api/v1/sessions/{session_id}/messages")
 async def send_message(session_id: str, req: MessageSend):
-    """Send a message to a session. Returns response when complete."""
+    """Send a message to a session.
+    
+    If stream=true, returns SSE with real-time tokens.
+    Otherwise returns complete response.
+    """
+    # Get session info
+    session = manager.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    core_name = session.get("core_name", "code_hammer")
+    
+    if req.stream:
+        # Real streaming - use core.run_stream()
+        import asyncio
+        
+        async def generate():
+            try:
+                core = get_core(core_name)
+                async for event in core.run_stream(req.message):
+                    if "error" in event:
+                        yield f"data: {json.dumps({'error': event['error']})}\n\n"
+                        break
+                    if "token" in event:
+                        yield f"data: {json.dumps({'token': event['token']})}\n\n"
+                    if event.get("done"):
+                        yield f"data: {json.dumps({'done': True})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    
+    # Non-streaming - wait for complete response
     result = manager.send(session_id, req.message)
     
     if not result.get("ok"):
         raise HTTPException(400, result.get("error"))
     
-    # If queued (threaded mode), wait for response
     if result.get("queued"):
         import time
         output = ""
-        for _ in range(60):  # max 60 seconds
+        for _ in range(60):
             time.sleep(0.5)
             messages = manager.receive(session_id)
             if messages:
@@ -95,17 +127,6 @@ async def send_message(session_id: str, req: MessageSend):
             output = "Timeout waiting for response"
     else:
         output = result.get("output", "")
-    
-    # Stream response as SSE
-    if req.stream:
-        async def generate():
-            # Stream word by word
-            words = output.split()
-            for i, word in enumerate(words):
-                yield f"data: {json.dumps({'token': word})}\n\n"
-                await asyncio.sleep(0.01)
-            yield f"data: {json.dumps({'done': True})}\n\n"
-        return StreamingResponse(generate(), media_type="text/event-stream")
     
     return {"output": output}
 

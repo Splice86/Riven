@@ -262,14 +262,13 @@ class Core:
                     if self._cancelled:
                         return None
                     
-                    # Print text content as-is (no color formatting)
+                    # Collect text content (no printing)
                     if isinstance(event, PartStartEvent):
                         part = event.part
                         if isinstance(part, ThinkingPart):
                             _thinking_buffer = part.content
                         elif hasattr(part, 'content'):
                             _streamed_text += part.content
-                            print(part.content, end="", flush=True)
                             
                     elif isinstance(event, PartDeltaEvent):
                         delta = event.delta
@@ -278,25 +277,19 @@ class Core:
                                 _thinking_buffer += delta.content_delta
                         elif hasattr(delta, 'content_delta') and delta.content_delta:
                             _streamed_text += delta.content_delta
-                            print(delta.content_delta, end="", flush=True)
                             
                     elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
                         _thinking_buffer = ""
-                        _in_thinking = False
-                        print(flush=True)
                         
                     elif isinstance(event, FunctionToolCallEvent):
                         # Actual tool call from model
                         logger.info(f"Tool call: {event.part.tool_name}")
-                        # Buffer tool call - will print with result
-                        # Add newline before tool output for clean separation
-                        print(flush=True)
                         args = event.part.args
                         tool_name = event.part.tool_name
                         pending_tool = {"name": tool_name, "args": args}
                         
                     elif isinstance(event, FunctionToolResultEvent):
-                        # Tool returned - just print call + result
+                        # Tool returned
                         content = event.result.content
                         tool_name = event.result.tool_name
                         
@@ -305,24 +298,19 @@ class Core:
                             content = content.content
                         content_str = str(content) if content else ""
                         
-                        # Print call (no color)
+                        # Store tool call and result
                         if pending_tool:
-                            print(f"→ {pending_tool['name']}{pending_tool['args']}", flush=True)
+                            tool_results.append({
+                                "tool": pending_tool['name'],
+                                "call": f"→ {pending_tool['name']}{pending_tool['args']}",
+                                "result": content_str
+                            })
                             pending_tool = None
-                        
-                        # Store FULL result in memory
-                        tool_results.append({
-                            "tool": tool_name,
-                            "result": content_str
-                        })
-                        
-                        # Truncate output for user display
-                        lines = content_str.split('\n')
-                        display_lines = lines[:10]
-                        for line in display_lines:
-                            print(f"  {line}", flush=True)
-                        if len(lines) > 10:
-                            print(f"  ... ({len(lines) - 10} more lines, {len(content_str)} total chars)", flush=True)
+                        else:
+                            tool_results.append({
+                                "tool": tool_name,
+                                "result": content_str
+                            })
                         
                         # Auto-refresh file context after file edits
                         if tool_name in ('replace_text', 'close_file', 'open_file'):
@@ -369,9 +357,7 @@ class Core:
                                     session=self._session_id
                                 )
                             
-                        # Add newline at end of output
-                        print(flush=True)
-                        # Return result but don't print - already streamed above
+                        # Return result
                         return event.result
                         
             except asyncio.CancelledError:
@@ -453,7 +439,7 @@ class Core:
         return user_input, message_history
 
     async def run(self, prompt: str) -> Any:
-        """Run the agent with the given prompt."""
+        """Run the agent with the given prompt - waits for complete response."""
         # Build prompts first (don't add to memory until success)
         system_prompt = self._build_system_prompt()
         user_prompt, message_history = self._build_prompt(prompt)
@@ -468,7 +454,6 @@ class Core:
         # Strip thinking tags from output before storing in memory
         output_text = str(result.output)
         if self.strip_thinking:
-            # Use regex to remove everything between thinking tags
             output_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
         else:
             output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
@@ -478,6 +463,100 @@ class Core:
         self._memory.add_context("assistant", output_text, session=self._session_id)
         
         return result
+    
+    async def run_stream(self, prompt: str):
+        """Run agent with streaming - yields tokens as they arrive.
+        
+        Yields dicts with 'token' key for SSE streaming.
+        """
+        system_prompt = self._build_system_prompt()
+        user_prompt, message_history = self._build_prompt(prompt)
+        
+        from pydantic_ai.messages import (
+            ModelMessage, ModelRequest, ModelResponse,
+            UserPromptPart, TextPart
+        )
+        
+        agent = self._create_agent(system_prompt)
+        _streamed_text = ""
+        _thinking_buffer = ""
+        pending_tool = None
+        tool_results = []
+        
+        try:
+            async for event in agent.run_stream_events(user_prompt, message_history=message_history):
+                if self._cancelled:
+                    yield {"error": "cancelled"}
+                    return
+                
+                # Handle text content
+                if isinstance(event, PartStartEvent):
+                    part = event.part
+                    if isinstance(part, ThinkingPart):
+                        _thinking_buffer = part.content
+                    elif hasattr(part, 'content') and part.content:
+                        _streamed_text += part.content
+                        yield {"token": part.content}
+                        
+                elif isinstance(event, PartDeltaEvent):
+                    delta = event.delta
+                    if isinstance(delta, ThinkingPartDelta):
+                        if delta.content_delta:
+                            _thinking_buffer += delta.content_delta
+                    elif hasattr(delta, 'content_delta') and delta.content_delta:
+                        _streamed_text += delta.content_delta
+                        yield {"token": delta.content_delta}
+                        
+                elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
+                    _thinking_buffer = ""
+                    
+                elif isinstance(event, FunctionToolCallEvent):
+                    args = event.part.args
+                    tool_name = event.part.tool_name
+                    pending_tool = {"name": tool_name, "args": args}
+                    
+                elif isinstance(event, FunctionToolResultEvent):
+                    content = event.result.content
+                    tool_name = event.result.tool_name
+                    if hasattr(content, 'content'):
+                        content = content.content
+                    content_str = str(content) if content else ""
+                    
+                    if pending_tool:
+                        tool_results.append({
+                            "tool": pending_tool['name'],
+                            "call": f"→ {pending_tool['name']}{pending_tool['args']}",
+                            "result": content_str
+                        })
+                        pending_tool = None
+                    else:
+                        tool_results.append({"tool": tool_name, "result": content_str})
+                        
+                elif isinstance(event, AgentRunResultEvent):
+                    # Store tool results in memory
+                    if self.store_tool_results > 0:
+                        for tr in tool_results:
+                            result = tr.get('result', '')
+                            if len(result) > self.store_tool_results * 100:
+                                result = result[:self.store_tool_results * 100] + "..."
+                            self._memory.add_context("tool", f"{tr['tool']}: {result}", session=self._session_id)
+                    
+                    # Strip thinking from final output
+                    final_output = _streamed_text
+                    if self.strip_thinking:
+                        final_output = re.sub(r"<think>.*?</think>", "", final_output, flags=re.DOTALL).strip()
+                    else:
+                        final_output = final_output.replace("<think>", "").replace("</think>", "").strip()
+                    
+                    # Add to memory
+                    self._memory.add_context("user", prompt, session=self._session_id)
+                    self._memory.add_context("assistant", final_output, session=self._session_id)
+                    
+                    yield {"done": True}
+                    return
+                    
+        except Exception as e:
+            yield {"error": str(e)}
 
 
 def _load_cores() -> dict:
