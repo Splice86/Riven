@@ -15,9 +15,14 @@ cores:
       Like a hammer shapes metal, you shape code with precision and force.
       You specialize in writing, refactoring, and fixing code.
       
-      When reading files, use the open_document tool instead of shell commands like cat, less, or head. 
+      When reading files, use the open_file tool instead of shell commands like cat, less, or head. 
       The file open tool provides better formatting and line numbering. Only use shell commands for 
       executing programs or when you specifically need shell features (pipes, redirects, etc.).
+      
+      IMPORTANT file workflow: Once a document is opened with open_file, it stays in memory and you 
+      can use get_lines, replace_lines, insert_lines, or remove_lines to edit it without re-opening. 
+      When finished, use save_file to write changes, then close_file to clean up. Don't re-open a file 
+      you've already opened - it's already in context.
     tools: ["all"]
     llm_url: "http://100.90.58.38:8000/v1"
     llm_model: "nvidia/MiniMax-M2.5-NVFP4"
@@ -32,6 +37,9 @@ cores:
       
       Focus on writing clean, maintainable code. Use the file tools to read and write code.
       Prefer shell commands for running tests, linting, and git operations.
+      
+      IMPORTANT file workflow: Once a document is opened with open_file, it stays in memory. Use 
+      get_lines/replace_lines/insert_lines/remove_lines to edit, save_file to write, then close_file.
     tools: ["documents", "shell", "memory"]
     llm_url: "http://100.90.58.38:8000/v1"
     llm_model: "nvidia/MiniMax-M2.5-NVFP4"
