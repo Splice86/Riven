@@ -178,42 +178,6 @@ class DocumentManager:
         
         return "\n".join(output_lines)
     
-    def replace_lines(self, path: str, line: int, new_content: str, auto_save: bool = True) -> str:
-        """Replace a single line with new content.
-        
-        Args:
-            path: Path to the file.
-            line: Line number to replace (1-indexed).
-            new_content: The new content for that line.
-            auto_save: If True, automatically save after editing (default: True).
-        """
-        abs_path = os.path.abspath(path)
-        
-        if abs_path not in self._documents:
-            return f"Error: {path} not open. Use open_file first."
-        
-        doc = self._documents[abs_path]
-        
-        if line < 1:
-            line = 1
-        if line > len(doc.lines):
-            line = len(doc.lines)
-        
-        # Ensure new_content ends with newline
-        new_line = new_content
-        if not new_line.endswith('\n'):
-            new_line += '\n'
-        
-        # Replace the single line
-        doc.lines[line-1] = new_line
-        doc.content = ''.join(doc.lines)
-        
-        # Auto-save if enabled
-        if auto_save:
-            self.save(abs_path)
-        
-        return f"Replaced lines {start}-{end} with {len(new_lines)} lines"
-    
     def insert_lines(self, path: str, after_line: int, new_content: str, auto_save: bool = True) -> str:
         """Insert new content after a specific line.
         
@@ -430,20 +394,6 @@ def get_module():
         """
         return manager.get_lines(path, start, end)
     
-    async def replace_lines(path: str, line: int, new_content: str, auto_save: bool = True) -> str:
-        """Replace a single line with new content.
-        
-        Args:
-            path: Path to the file.
-            line: Line number to replace (1-indexed).
-            new_content: The new content for that line.
-            auto_save: If True, automatically save after editing (default: True).
-            
-        Returns:
-            Confirmation message
-        """
-        return manager.replace_lines(path, line, new_content, auto_save)
-    
     async def insert_lines(path: str, after_line: int, new_content: str, auto_save: bool = True) -> str:
         """Insert new content after a specific line.
         
@@ -544,17 +494,11 @@ You should use this context instead of calling get_lines() or re-opening files.
 
 ### Workflow: Open → Edit → Save → Close
 1. **open_file(path)**: Opens a file (do this first)
-2. **replace_lines(path, line, new_content)**: Replace ONE line by number
-3. **replace_text(path, old_text, new_text)**: Replace text anywhere using fuzzy matching
-4. **insert_lines(path, after_line, new_content)**: Insert new lines after a line
-5. **remove_lines(path, start, end)**: Delete lines by number
-6. **save_file(path)**: Write changes to disk
-7. **close_file(path)**: Close the file
-
-### When to use which tool
-- **replace_lines**: Use when you know the exact line number - just replaces that line
-- **replace_text**: Use fuzzy matching to find text anywhere in file - no line number needed
-- **insert_lines/remove_lines**: For bigger structural changes
+2. **replace_text(path, old_text, new_text)**: Replace text anywhere using fuzzy matching
+3. **insert_lines(path, after_line, new_content)**: Insert new lines after a line
+4. **remove_lines(path, start, end)**: Delete lines by number
+5. **save_file(path)**: Write changes to disk
+6. **close_file(path)**: Close the file
 
 ### Tips
 - Check {file} in system prompt for open file line numbers
@@ -565,7 +509,6 @@ You should use this context instead of calling get_lines() or re-opening files.
 ### Example
 ```
 open_file("main.py")
-replace_lines("main.py", 10, "new content here")  # Replace line 10
 replace_text("main.py", "old_function", "new_function")  # Fuzzy find & replace
 save_file("main.py")
 close_file("main.py")
