@@ -59,7 +59,10 @@ def print_banner() -> None:
         
         # Tagline
         print(f"{CYAN}┌{'─' * 40}┐{RESET}")
-        print(f"{CYAN}│{RESET}{MAGENTA}        {TAGLINE}{CYAN}{' ' * (40 - len(TAGLINE))+8}{RESET}{CYAN}│{RESET}")
+        # Calculate visible width (account for combining chars)
+        import unicodedata
+        visible_len = len(unicodedata.normalize('NFKC', TAGLINE))
+        print(f"{CYAN}│{RESET}{MAGENTA}        {TAGLINE}{CYAN}{' ' * (40 - visible_len)+8}{RESET}{CYAN}│{RESET}")
         print(f"{CYAN}└{'─' * 40}┘{RESET}")
         
     except ImportError:
