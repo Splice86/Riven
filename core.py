@@ -9,15 +9,8 @@ from typing import Any
 import requests
 import yaml
 
-# ANSI color codes for output
-GREY = "\033[90m"      # Dull grey for thinking
-WHITE = "\033[97m"     # White for replies
-LIGHT_BLUE = "\033[94m"  # Light blue for tool calls
-RESET = "\033[0m"
-
 # Global to store the last built system prompt (for debug/diagnostics)
 _current_system_prompt: str = ""
-_in_thinking: bool = False  # Track if we're inside <think> tags (for color output)
 from pydantic_ai import Agent
 from pydantic_ai import AgentStreamEvent, AgentRunResultEvent
 from pydantic_ai.messages import (
@@ -269,52 +262,23 @@ class Core:
                     if self._cancelled:
                         return None
                     
-                    # Handle thinking/reasoning content
-                    def _print_with_thinking_color(text: str) -> None:
-                        """Print text, switching colors based on <think> tags."""
-                        global _in_thinking
-                        while text:
-                            if _in_thinking:
-                                # We're inside thinking - look for end tag
-                                end_idx = text.find('</think>')
-                                if end_idx != -1:
-                                    print(f"{GREY}{text[:end_idx]}{RESET}", end="", flush=True)
-                                    text = text[end_idx + len('</think>'):]
-                                    _in_thinking = False
-                                else:
-                                    print(f"{GREY}{text}{RESET}", end="", flush=True)
-                                    break
-                            else:
-                                # We're outside thinking - look for start tag
-                                start_idx = text.find('<think>')
-                                if start_idx != -1:
-                                    print(f"{WHITE}{text[:start_idx]}{RESET}", end="", flush=True)
-                                    text = text[start_idx + len('<think>'):]
-                                    _in_thinking = True
-                                else:
-                                    print(f"{WHITE}{text}{RESET}", end="", flush=True)
-                                    break
-                    
+                    # Print text content as-is (no color formatting)
                     if isinstance(event, PartStartEvent):
                         part = event.part
                         if isinstance(part, ThinkingPart):
                             _thinking_buffer = part.content
-                            if _thinking_buffer:
-                                print(flush=True)
-                                _print_with_thinking_color(_thinking_buffer)
                         elif hasattr(part, 'content'):
                             _streamed_text += part.content
-                            _print_with_thinking_color(part.content)
+                            print(part.content, end="", flush=True)
                             
                     elif isinstance(event, PartDeltaEvent):
                         delta = event.delta
                         if isinstance(delta, ThinkingPartDelta):
                             if delta.content_delta:
                                 _thinking_buffer += delta.content_delta
-                                _print_with_thinking_color(delta.content_delta)
                         elif hasattr(delta, 'content_delta') and delta.content_delta:
                             _streamed_text += delta.content_delta
-                            _print_with_thinking_color(delta.content_delta)
+                            print(delta.content_delta, end="", flush=True)
                             
                     elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
                         _thinking_buffer = ""
@@ -332,7 +296,7 @@ class Core:
                         pending_tool = {"name": tool_name, "args": args}
                         
                     elif isinstance(event, FunctionToolResultEvent):
-                        # Tool returned - print call + result together
+                        # Tool returned - just print call + result
                         content = event.result.content
                         tool_name = event.result.tool_name
                         
@@ -341,9 +305,9 @@ class Core:
                             content = content.content
                         content_str = str(content) if content else ""
                         
-                        # Print call + result as one block in light blue
+                        # Print call (no color)
                         if pending_tool:
-                            print(f"{LIGHT_BLUE}→ {pending_tool['name']}{pending_tool['args']}{RESET}", flush=True)
+                            print(f"→ {pending_tool['name']}{pending_tool['args']}", flush=True)
                             pending_tool = None
                         
                         # Store FULL result in memory
@@ -354,9 +318,9 @@ class Core:
                         
                         # Truncate output for user display
                         lines = content_str.split('\n')
-                        display_lines = lines[:10]  # Show first 10 lines
+                        display_lines = lines[:10]
                         for line in display_lines:
-                            print(f"{LIGHT_BLUE}  {line}{RESET}", flush=True)
+                            print(f"  {line}", flush=True)
                         if len(lines) > 10:
                             print(f"  ... ({len(lines) - 10} more lines, {len(content_str)} total chars)", flush=True)
                         

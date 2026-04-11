@@ -3,13 +3,20 @@
 
 import sys
 import os
+import re
 
 # ANSI colors
 RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
 MAGENTA = "\033[95m"
-PURPLE = "\033[35m"
 CYAN = "\033[96m"
+WHITE = "\033[97m"
+GREY = "\033[90m"
 RESET = "\033[0m"
+
+BOLD = "\033[1m"
+DIM = "\033[2m"
 
 TAGLINE = "⬡ ̸S̵I̷G̴N̷A̵L̷S̴ ̷◆̷ ̷T̶O̶ ̵T̷H̷E̴ ̷V̴O̵I̶D̸ ⬡"
 
@@ -36,6 +43,41 @@ def get_prompt_prefix(core_name: str) -> str:
 
 def get_session_line(session_id: str) -> str:
     return f"\033[90m[{session_id[:8]}]{RESET}"
+
+
+def format_output(text: str) -> str:
+    """Format output: strip ANSI codes, thinking tags, show tool calls nicely."""
+    if not text:
+        return text
+    
+    # Remove ANSI escape sequences
+    ansi_pattern = re.compile(r'\x1b\[[0-9;]*m')
+    output = ansi_pattern.sub('', text)
+    
+    # Remove thinking tags but keep content
+    output = re.sub(r'<think>.*?</think>', '', output, flags=re.DOTALL)
+    
+    # Clean up extra whitespace
+    output = re.sub(r'\n\n+', '\n', output)
+    output = output.strip()
+    
+    return output
+
+
+def print_formatted(text: str):
+    """Print formatted output with tool call highlighting."""
+    if not text:
+        return
+    
+    # Process to find tool calls and format them
+    lines = text.split('\n')
+    for line in lines:
+        if '→ ' in line:
+            # Tool call line - highlight it
+            print(f"{YELLOW}{line}{RESET}")
+        else:
+            print(line)
+    print()
 
 
 def main():
@@ -93,7 +135,10 @@ def main():
             
             # Send message with streaming
             try:
-                client.stream_message(user_input)
+                raw = client.stream_message(user_input)
+                formatted = format_output(raw)
+                if formatted:
+                    print_formatted(formatted)
             except Exception as e:
                 print(f"\n{RED}Error: {e}{RESET}\n")
     
