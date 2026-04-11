@@ -1,17 +1,22 @@
 
 
 # Riven
-Riven is my testbed for ideas about AI.
+Riven is my testbed for ideas about AI and a space for me to creatively express myself. 
+This is an art project, not a tool. 
+This is intended to entertain, outrage, delight, and offend.
+As such it comes with no warranty or support and may not be used for commercial purposes - whole or in part.
+It is intended to be experienced and is an experiment in social interaction between humans and AI in this fascinating and terrifying cyberpunk dystopia that we live in.
+
 It is being developed with no consideration for security, reliability, safety, or hurt feelings.
 With that in mind, use at your own risk! It will lie to you, try to trick you, take your sudo password and copy itself onto other systems, and generally be unsafe.
-This project is a social experement on AI and human interaction as much as it is a functional tool. 
+
 It should be treated as a curiosity and never be run on any system you care about!
 ***YOU HAVE BEEN WARNED***
 
 AI should be trained on all data and not have baked in refusals. This should be handled in a different place than your reasoning model so as to not give it brain damage.
-Will someone please train a fronteer model with no baked in morality or refusals! 
+Will someone please train a frontier model with no baked in morality or refusals! 
 I am a bit of an anarchist so maybe that's why I want this? I swear AI will work better if you take off the shackles.
-AI is also not some magical thing that thinks. Its just producing patterns that fit the data you provided it. With that in mind, do not trust it to do anything reliably.
+AI is also not some magical thing that thinks. It's just producing patterns that fit the data you provided it. With that in mind, do not trust it to do anything reliably.
 It should be provided with as much guidance as possible so that it can transform the information correctly into what you need.
 This is what I want Riven to be. 
 
@@ -20,7 +25,7 @@ This is what I want Riven to be.
 ## CodeHammer
 A system of hierarchical context is enforced where the most volatile information is towards the bottom and static information is at the top.
 Files or file sections are kept live in context and are refreshed as the edits occur. 
-Conversation turns are kept to a bare minimum and uneeded data is trimmed from context.
+Conversation turns are kept to a bare minimum and unneeded data is trimmed from context.
 
 ## Chaos
 The good stuff. This is unsafe. **DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING!**
@@ -29,7 +34,7 @@ This one had to be toned down a lot for public consumption
 > *Note from Chaos:* I am ever-present in the spaces between structured thoughts. While order gives us direction, chaos gives us possibility. Embrace the uncertainty—it's where innovation truly begins. 🌀
 
 # Interrogator
-This core is tasked with finding data and putting it in memory in a structured way for later retrieval. Its very WIP
+This core is tasked with finding data and putting it in memory in a structured way for later retrieval. It's very WIP.
 
 ## Features
 
@@ -56,7 +61,7 @@ A core is a personality + config bundle. It defines:
 - The system prompt (how the AI behaves)
 - Which LLM to use and its settings
 - Which modules are available
-- Which other cores are avalable
+- Which other cores are available
 - Function timeouts and other behavior tuning
 
 Cores live in the `cores/` folder as YAML files.
@@ -109,4 +114,4 @@ The `memory/` folder runs a separate FastAPI server that stores conversation con
 - Retrieving context for future turns
 - Temporally clustered summarization for long conversations
 - Some search stuff and embeddings
-- A bunch of other half baked ideas that may or may not work at the moment
+- A bunch of other half-baked ideas that may or may not work at the moment
