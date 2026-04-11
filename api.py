@@ -21,6 +21,7 @@ class SessionCreate(BaseModel):
 class MessageSend(BaseModel):
     message: str
     stream: bool = False
+    core_name: str = "code_hammer"
 
 
 # ============== API ==============
@@ -80,16 +81,15 @@ def delete_session(session_id: str):
 
 @app.post("/api/v1/sessions/{session_id}/messages")
 async def send_message(session_id: str, req: MessageSend):
-    """Send a message. Stream or get result. Session ends after processing.
+    """Send a message. Stream or get result.
     
     - stream=true: SSE with tokens as they arrive
     - stream=false: JSON with full output when done
-    """
-    session = manager.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
     
-    core_name = session.get("core_name", "code_hammer")
+    Session ID is used for memory persistence (not stored in manager).
+    """
+    # Get core_name from request or default
+    core_name = req.core_name or "code_hammer"
     
     if req.stream:
         # Streaming mode - yield tokens via SSE
