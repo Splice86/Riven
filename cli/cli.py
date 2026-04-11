@@ -28,14 +28,14 @@ def print_banner():
         result = pyfiglet.figlet_format("RIVEN", font="slant")
         
         # Vertical gradient: dark red -> magenta -> cyan
-        gradient = [31, 31, 35, 35, 35, 35, 36, 36]  # explicit colors
+        gradient = [31, 31, 35, 35, 35, 36, 36, 36]  # explicit colors
         
         lines = result.split('\n')
         nonempty = [l for l in lines if l.strip()]
         num_lines = len(nonempty)
         
         for i, line in enumerate(nonempty):
-            color_idx = int(i / num_lines * len(gradient))
+            color_idx = int(i / max(num_lines - 1, 1) * (len(gradient) - 1))
             color_idx = min(color_idx, len(gradient) - 1)
             color = gradient[color_idx]
             print(f"\033[{color}m{line}\033[0m")
