@@ -1,6 +1,7 @@
 """Memory API server - FastAPI endpoints for memory storage and search."""
 
 import os
+import yaml
 from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -9,6 +10,18 @@ from datetime import datetime, timezone
 from database import MemoryDB, init_db
 from context import Context
 import numpy as np
+
+# Load config
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+try:
+    with open(CONFIG_PATH) as f:
+        CONFIG = yaml.safe_load(f) or {}
+except Exception:
+    CONFIG = {}
+
+# Database settings from config
+DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG.get('database', {}).get('db_dir', 'database'))
+os.makedirs(DB_DIR, exist_ok=True)
 
 # Try to import tiktoken for token counting
 try:
@@ -21,10 +34,6 @@ app = FastAPI(title="Riven Memory API")
 
 # Default DB name
 DEFAULT_DB = "default.db"
-
-# Directory for DB files
-DB_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 def get_db_path(db_name: str) -> str:
     """Get full path for a DB file."""

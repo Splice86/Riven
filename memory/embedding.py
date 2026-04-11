@@ -2,10 +2,19 @@
 
 import os
 import sqlite3
+import yaml
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 from typing import Optional
+
+# Load config
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+try:
+    with open(CONFIG_PATH) as f:
+        CONFIG = yaml.safe_load(f) or {}
+except Exception:
+    CONFIG = {}
 
 # HuggingFace token for faster downloads and higher rate limits
 HF_TOKEN = os.environ.get("HF_TOKEN", None)
@@ -26,14 +35,14 @@ MODELS = {
     },
 }
 
-# Default model (270m, 0.6b, or 27b)
-DEFAULT_MODEL_SIZE = "27b"
+# Model settings from config (defaults)
+DEFAULT_MODEL_SIZE = CONFIG.get('embedding', {}).get('model_size', '270m')
+FORCE_CPU = CONFIG.get('embedding', {}).get('force_cpu', True)
 
-# Force CPU mode (set to True to always use CPU)
-FORCE_CPU = True
-
-# Cache settings
-DEFAULT_CACHE_DB = "embeddings_cache.db"
+# Cache settings from config
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG.get('cache', {}).get('cache_dir', 'database'))
+os.makedirs(CACHE_DIR, exist_ok=True)
+DEFAULT_CACHE_DB = os.path.join(CACHE_DIR, CONFIG.get('cache', {}).get('cache_db', 'embeddings_cache.db'))
 
 
 class EmbeddingModel:
