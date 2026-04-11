@@ -3,6 +3,8 @@
 import os
 from typing import Optional
 
+from modules import Module
+
 # Load config - same as core.py
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 try:
