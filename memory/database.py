@@ -65,7 +65,7 @@ class MemoryDB:
         properties: dict[str, str] | None = None,
         embedding: np.ndarray | None = None,
         created_at: str | None = None,
-        session_id: str | None = None
+        session: str | None = None
     ) -> int:
         """Add a memory with optional keywords and properties.
         
@@ -75,7 +75,7 @@ class MemoryDB:
             properties: Optional key-value pairs (e.g., {"role": "user"})
             embedding: Optional pre-computed embedding (generated from content if not provided)
             created_at: Optional ISO timestamp (e.g., "2025-01-01T10:00:00+00:00")
-            session_id: Optional session ID to group memories (e.g., for conversation sessions)
+            session: Optional session ID to group memories (stored as property)
             
         Returns:
             The ID of the inserted memory
@@ -90,12 +90,17 @@ class MemoryDB:
         # Compute token count
         token_count = _count_tokens(content)
         
+        # Merge session into properties
+        props = properties.copy() if properties else {}
+        if session:
+            props['session'] = session
+        
         with sqlite3.connect(self.db_path) as conn:
-            # Insert memory
+            # Insert memory (session stored as property, not column)
             cursor = conn.execute(
-                """INSERT INTO memories (content, embedding, created_at, last_updated, token_count, session_id)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (content, embedding.tobytes(), created_at, created_at, token_count, session_id)
+                """INSERT INTO memories (content, embedding, created_at, last_updated, token_count)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (content, embedding.tobytes(), created_at, created_at, token_count)
             )
             memory_id = cursor.lastrowid
             
@@ -127,8 +132,8 @@ class MemoryDB:
                     )
             
             # Handle properties (lowercase key names)
-            if properties:
-                for key, value in properties.items():
+            if props:
+                for key, value in props.items():
                     key_lower = key.lower().strip()
                     if key_lower:
                         conn.execute(
@@ -307,7 +312,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         db_path: Path to the SQLite database file
     """
     with sqlite3.connect(db_path) as conn:
-        # Main memories table - simplified
+        # Main memories table - session stored as property, not column
         conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -316,8 +321,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
                 created_at TEXT NOT NULL,
                 last_updated TEXT NOT NULL,
                 last_accessed TEXT,
-                token_count INTEGER DEFAULT 0,
-                session_id TEXT
+                token_count INTEGER DEFAULT 0
             )
         """)
         

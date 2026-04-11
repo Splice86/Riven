@@ -101,34 +101,34 @@ class MemoryClient:
         self.session_id = None  # Current session ID
     
     def new_session(self) -> str:
-        """Create a new session and return the session_id."""
+        """Create a new session and return the session."""
         resp = requests.post(
             f"{self.base_url}/session/new",
             params={"db_name": self.db_name}
         )
         resp.raise_for_status()
-        self.session_id = resp.json().get("session_id")
+        self.session_id = resp.json().get("session")
         return self.session_id
     
-    def add_context(self, role: str, content: str, created_at: str = None, session_id: str = None) -> dict:
+    def add_context(self, role: str, content: str, created_at: str = None, session: str = None) -> dict:
         """Add a context message."""
-        # Use provided session_id or fall back to current
-        session_id = session_id or self.session_id
+        # Use provided session or fall back to current
+        session = session or self.session_id
         resp = requests.post(
             f"{self.base_url}/context",
             params={"db_name": self.db_name},
-            json={"role": role, "content": content, "created_at": created_at, "session_id": session_id}
+            json={"role": role, "content": content, "created_at": created_at, "session": session}
         )
         resp.raise_for_status()
         return resp.json()
     
-    def get_context(self, limit: int = 100, session_id: str = None) -> list[dict]:
+    def get_context(self, limit: int = 100, session: str = None) -> list[dict]:
         """Get context for prompt."""
-        # Use provided session_id or fall back to current
-        session_id = session_id or self.session_id
+        # Use provided session or fall back to current
+        session = session or self.session_id
         resp = requests.get(
             f"{self.base_url}/context",
-            params={"db_name": self.db_name, "limit": limit, "session_id": session_id}
+            params={"db_name": self.db_name, "limit": limit, "session": session}
         )
         resp.raise_for_status()
         return resp.json().get("context", [])
@@ -402,7 +402,7 @@ class Core:
                                 self._memory.add_context(
                                     "tool",
                                     f"{tr['tool']}: {result}",
-                                    session_id=self._session_id
+                                    session=self._session_id
                                 )
                             
                         # Add newline at end of output
@@ -466,7 +466,7 @@ class Core:
         contains the converted memory context.
         """
         # Get context from memory
-        context = self._memory.get_context(session_id=self._session_id)
+        context = self._memory.get_context(session=self._session_id)
         
         if not context:
             return user_input, []
@@ -510,8 +510,8 @@ class Core:
             output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
         
         # Add user/assistant to memory after successful run
-        self._memory.add_context("user", prompt, session_id=self._session_id)
-        self._memory.add_context("assistant", output_text, session_id=self._session_id)
+        self._memory.add_context("user", prompt, session=self._session_id)
+        self._memory.add_context("assistant", output_text, session=self._session_id)
         
         return result
 

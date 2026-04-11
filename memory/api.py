@@ -99,13 +99,14 @@ class AddContextRequest(BaseModel):
     content: str
     role: str  # "user", "assistant", "system", "tool"
     created_at: str | None = None  # Optional timestamp
-    session_id: str | None = None  # Optional session ID
+    session: str | None = None  # Optional session ID (stored as property)
+
 
 
 class GetContextRequest(BaseModel):
     """Request to get context."""
     limit: int = 100
-    session_id: str | None = None  # Optional session ID to filter by
+    session: str | None = None  # Optional session ID to filter by
 
 
 # Database dependency - gets DB from query param
@@ -274,7 +275,7 @@ async def add_context(
         Memory ID, role, token count, and summarization status
     """
     ctx = Context(db, max_tokens=max_tokens or 32000, min_cluster_size=min_cluster_size or 3)
-    result = ctx.add(request.role, request.content, request.created_at, request.session_id)
+    result = ctx.add(request.role, request.content, request.created_at, request.session)
     
     return result
 
@@ -283,7 +284,7 @@ async def add_context(
 async def get_context(
     limit: int = Query(100, description="Max messages to return"),
     max_tokens: int | None = Query(None, description="Max tokens threshold (for get)"),
-    session_id: str | None = Query(None, description="Session ID to filter context"),
+    session: str | None = Query(None, description="Session ID to filter context"),
     db: MemoryDB = Depends(get_db)
 ) -> dict:
     """Get context for LLM: summary first, then unsummarized turns.
@@ -291,14 +292,14 @@ async def get_context(
     Args:
         limit: Maximum number of unsummarized turns to return
         max_tokens: Override max tokens (optional, for metadata)
-        session_id: Session ID to filter context (optional)
+        session: Session ID to filter context (optional)
         db: Database name (query param)
         
     Returns:
         List of context messages (summary + unsummarized)
     """
     ctx = Context(db)
-    context = ctx.get(limit=limit, session_id=session_id)
+    context = ctx.get(limit=limit, session=session)
     
     return {"context": context, "count": len(context)}
 
@@ -307,14 +308,14 @@ async def get_context(
 async def new_session(db: MemoryDB = Depends(get_db)) -> dict:
     """Generate a new session ID.
     
-    Returns a new UUID that can be used for session_id in context calls.
+    Returns a new UUID that can be used for session in context calls.
     Use this when starting a new conversation or after clearing session context.
     
     Returns:
-        New session_id string
+        New session string
     """
-    session_id = str(uuid.uuid4())
-    return {"session_id": session_id}
+    session = str(uuid.uuid4())
+    return {"session": session}
 
 
 @app.post("/memories/summary")
