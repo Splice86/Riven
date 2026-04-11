@@ -35,7 +35,7 @@ system_prompt: |
 tools: ["all"]
 llm_url: "http://127.0.0.1:8000/v1"
 llm_model: "nvidia/MiniMax-M2.5-NVFP4"
-memory_db: "riven"
+memory_db: "codehammer"
 tool_timeout: 60
 strip_thinking: true
 store_tool_results: 300  # 0=skip, N=store last N lines (truncates long output)
