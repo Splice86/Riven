@@ -2,12 +2,29 @@
 
 import asyncio
 import logging
+import sys
+import threading
 
 from core import get_core, list_cores
+
+# Flag to track if we're currently processing a request
+_processing = False
+
+
+def input_with_blocking(prompt: str) -> str:
+    """Input that blocks until processing is done."""
+    global _processing
+    
+    while _processing:
+        pass  # Spin wait - simple blocking
+    
+    return input(prompt).strip()
 
 
 async def main():
     """Interactive REPL for the agent."""
+    global _processing
+    
     import argparse
     
     parser = argparse.ArgumentParser(description="Riven AI Agent")
@@ -29,7 +46,10 @@ async def main():
     
     while True:
         try:
+            # Block input while processing
+            _processing = True
             prompt = input(f"{prompt_prefix} > ").strip()
+            _processing = False
             
             if prompt.lower() in ('quit', 'exit'):
                 print("Goodbye!")
@@ -40,11 +60,16 @@ async def main():
             
             # Result is already streamed to terminal, just run it
             await core.run(prompt)
+            _processing = False
             
         except KeyboardInterrupt:
-            print("\nGoodbye!")
-            break
+            # Interrupt - cancel any ongoing operation
+            _processing = False
+            core.cancel()
+            print("\n^C Interrupted")
+            print(f"{prompt_prefix} > ", end="")
         except Exception as e:
+            _processing = False
             print(f"Error: {e}\n")
 
 

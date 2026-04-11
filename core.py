@@ -134,6 +134,7 @@ class Core:
         
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self._cancelled = False
 
         self._modules = ModuleRegistry()
         self._memory = MemoryClient(db_name=self.db_name)
@@ -151,7 +152,11 @@ class Core:
                 self._modules.register(module)
             elif module.name in self._tool_filter:
                 self._modules.register(module)
-
+    
+    def cancel(self) -> None:
+        """Cancel any ongoing operation."""
+        self._cancelled = True
+    
     def _create_agent(self, system_prompt: str) -> Agent:
         """Create a pydantic_ai Agent."""
         client = AsyncOpenAI(base_url=self.llm_url, api_key=self.llm_api_key)
@@ -182,6 +187,9 @@ class Core:
         _thinking_printed = False
         _streamed_text = ""  # Track text already streamed
         
+        # Reset cancelled flag at start
+        self._cancelled = False
+        
         for attempt in range(self.max_retries):
             try:
                 agent = self._create_agent(system_prompt)
@@ -189,6 +197,10 @@ class Core:
                 # Use run_stream_events() for real-time tool output
                 # Pass message_history to inject our memory context
                 async for event in agent.run_stream_events(prompt, message_history=message_history):
+                    # Check for cancellation
+                    if self._cancelled:
+                        return None
+                    
                     # Handle thinking/reasoning content
                     if isinstance(event, PartStartEvent):
                         part = event.part
