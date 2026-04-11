@@ -57,6 +57,7 @@ class DocumentManager:
         Returns:
             Document content with line numbers (or just confirmation if show_line_numbers=False)
         """
+        abs_path = os.path.abspath(path)
         
         if not os.path.exists(abs_path):
             return f"Error: File {abs_path} not found"
