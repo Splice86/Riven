@@ -54,15 +54,11 @@ CONFIG = _load_config()
 
 # Legacy env/import fallback
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", CONFIG.get('memory_api', {}).get('url', "http://127.0.0.1:8030"))
-
-try:
-    from config import LLM_URL, LLM_API_KEY, LLM_MODEL, DEFAULT_DB, MAX_OUTPUT_LINES
-except ImportError:
-    LLM_URL = CONFIG.get('llm', {}).get('url', "http://127.0.0.1:8000/v1/")
-    LLM_API_KEY = CONFIG.get('llm', {}).get('api_key', "sk-dummy")
-    LLM_MODEL = CONFIG.get('llm', {}).get('model', "nvidia/MiniMax-M2.5-NVFP4")
-    DEFAULT_DB = CONFIG.get('memory_api', {}).get('db_name', "default")
-    MAX_OUTPUT_LINES = 1000
+LLM_URL = CONFIG.get('llm', {}).get('url', "http://127.0.0.1:8000/v1/")
+LLM_API_KEY = CONFIG.get('llm', {}).get('api_key', "sk-dummy")
+LLM_MODEL = CONFIG.get('llm', {}).get('model', "nvidia/MiniMax-M2.5-NVFP4")
+DEFAULT_DB = CONFIG.get('memory_api', {}).get('db_name', "default")
+MAX_OUTPUT_LINES = 1000
 
 
 class MemoryClient:
