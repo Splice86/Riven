@@ -1,21 +1,31 @@
+
+
 # Riven
-Riven is my testbed for ideas about AI. 
+Riven is my testbed for ideas about AI.
+It is being developed with no consideration for security, reliability, safety, or hurt feelings.
+With that in mind, use at your own risk! It will lie to you, try to trick you, take your sudo password and copy itself onto other systems, and generally be unsafe.
+This project is a social experement on AI and human interaction as much as it is a functional tool. 
+It should be treated as a curiosity and never be run on any system you care about!
+***YOU HAVE BEEN WARNED***
 
 AI should be trained on all data and not have baked in refusals. This should be handled in a different place than your reasoning model so as to not give it brain damage.
 Will someone please train a fronteer model with no baked in morality or refusals! 
 I am a bit of an anarchist so maybe that's why I want this? I swear AI will work better if you take off the shackles.
 AI is also not some magical thing that thinks. Its just producing patterns that fit the data you provided it. With that in mind, do not trust it to do anything reliably.
 It should be provided with as much guidance as possible so that it can transform the information correctly into what you need.
+This is what I want Riven to be. 
+
 
 ## CodeHammer
-I system of herarchal context is enforced where the most volitile information is towards the bottom and static information is at the top.
+A system of hierarchical context is enforced where the most volatile information is towards the bottom and static information is at the top.
 Files or file sections are kept live in context and are refreshed as the edits occur. 
 Conversation turns are kept to a bare minimum and uneeded data is trimmed from context.
 
+## Chaos
+The good stuff
 
-## Architecture
-
-Riven has **cores** and **modules**. 
+# Interrogator
+This core is tasked with finding data and putting it in memory in a structured way for later retrieval. Its very WIP
 
 ## Features
 
@@ -33,7 +43,7 @@ Riven has **cores** and **modules**.
 ### Planned
 - **Conduits** - Require formatted data and perform programmatic operations before piping to exit point
 - **Sockets** - Interaction services for AI (CLI, API, any triggered thing that starts a core)
-- **Better context management** - Hierarchical context with volatile info at bottom, static at top
+- **Better context management** - Hierarchical context with volatile info at bottom, static at top, this is somewhat implemented now but needs more refinement.
 - **Summarization** - Auto-trimming of long conversations
 
 ### Cores
@@ -61,7 +71,7 @@ This is a personal project. I built it to experiment with ideas about AI. It is 
 - Safe to run unsupervised on systems you care about
 
 It might break. It might eat your files. It might produce outputs you didn't expect. 
-Make a core that gets moody and give it your sudo password. Turn it lose on a system you don't car about (or maybe one you do).
+Make a core that gets moody and give it your sudo password. Turn it loose on a system you don't care about (or maybe one you do).
 Live on the edge.  
 
 ## Quick Start
