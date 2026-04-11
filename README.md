@@ -22,7 +22,7 @@ Files or file sections are kept live in context and are refreshed as the edits o
 Conversation turns are kept to a bare minimum and uneeded data is trimmed from context.
 
 ## Chaos
-The good stuff
+The good stuff. This is unsafe. **DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING!**
 
 # Interrogator
 This core is tasked with finding data and putting it in memory in a structured way for later retrieval. Its very WIP
