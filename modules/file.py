@@ -129,12 +129,19 @@ class DocumentManager:
         
         return "\n".join(output_lines)
     
-    def replace_lines(self, path: str, start: int, end: int, new_content: str) -> str:
+    def replace_lines(self, path: str, start: int, end: int, new_content: str, auto_save: bool = True) -> str:
         """Replace a range of lines with new content.
         
         Note: You must provide correct indentation in new_content. The function
         does not adjust indentation automatically - match the surrounding
         code's indentation (e.g., 4 spaces for Python).
+        
+        Args:
+            path: Path to the file.
+            start: Start line number (1-indexed, inclusive).
+            end: End line number (inclusive).
+            new_content: The new content to replace the range with.
+            auto_save: If True, automatically save after editing (default: True).
         """
         abs_path = os.path.abspath(path)
         
@@ -157,14 +164,24 @@ class DocumentManager:
         doc.lines[start-1:end] = new_lines
         doc.content = ''.join(doc.lines)
         
+        # Auto-save if enabled
+        if auto_save:
+            self.save(abs_path)
+        
         return f"Replaced lines {start}-{end} with {len(new_lines)} lines"
     
-    def insert_lines(self, path: str, after_line: int, new_content: str) -> str:
+    def insert_lines(self, path: str, after_line: int, new_content: str, auto_save: bool = True) -> str:
         """Insert new content after a specific line.
         
         Note: You must provide correct indentation in new_content. The function
         does not adjust indentation automatically - match the surrounding
         code's indentation (e.g., 4 spaces for Python).
+        
+        Args:
+            path: Path to the file.
+            after_line: Insert after this line number.
+            new_content: Content to insert.
+            auto_save: If True, automatically save after editing (default: True).
         """
         abs_path = os.path.abspath(path)
         
@@ -183,12 +200,22 @@ class DocumentManager:
         doc.lines[after_line:after_line] = new_lines
         doc.content = ''.join(doc.lines)
         
+        if auto_save:
+            self.save(abs_path)
+        doc.content = ''.join(doc.lines)
+        
         return f"Inserted {len(new_lines)} lines after line {after_line}"
     
-    def remove_lines(self, path: str, start: int, end: int) -> str:
+    def remove_lines(self, path: str, start: int, end: int, auto_save: bool = True) -> str:
         """Remove a range of lines.
         
         Note: This removes entire lines only.
+        
+        Args:
+            path: Path to the file.
+            start: Start line number (1-indexed).
+            end: End line number (inclusive).
+            auto_save: If True, automatically save after editing (default: True).
         """
         abs_path = os.path.abspath(path)
         
@@ -206,6 +233,9 @@ class DocumentManager:
         del doc.lines[start-1:end]
         doc.content = ''.join(doc.lines)
         
+        if auto_save:
+            self.save(abs_path)
+        
         return f"Removed lines {start}-{end} from {os.path.basename(path)} ({num_removed} lines)"
     
     def replace_text_at_line(
@@ -214,7 +244,8 @@ class DocumentManager:
         line_number: int,
         old_text: str,
         new_text: str,
-        use_regex: bool = False
+        use_regex: bool = False,
+        auto_save: bool = True
     ) -> str:
         """Replace text at a specific line using pattern matching.
         
@@ -224,6 +255,7 @@ class DocumentManager:
             old_text: Text pattern to find (literal or regex if use_regex=True).
             new_text: Replacement text.
             use_regex: If True, treat old_text as a regex pattern.
+            auto_save: If True, automatically save after editing (default: True).
             
         Returns:
             Confirmation message with what was replaced.
@@ -254,6 +286,9 @@ class DocumentManager:
         
         doc.lines[line_number - 1] = new_line
         doc.content = ''.join(doc.lines)
+        
+        if auto_save:
+            self.save(abs_path)
         
         return f"Replaced at line {line_number}"
     
@@ -339,7 +374,7 @@ def get_module():
         """
         return manager.get_lines(path, start, end)
     
-    async def replace_lines(path: str, start: int, end: int, new_content: str) -> str:
+    async def replace_lines(path: str, start: int, end: int, new_content: str, auto_save: bool = True) -> str:
         """Replace a range of lines with new content.
         
         Args:
@@ -347,44 +382,48 @@ def get_module():
             start: Start line number (1-indexed, inclusive).
             end: End line number (inclusive).
             new_content: The new content to replace the range with.
+            auto_save: If True, automatically save after editing (default: True).
             
         Returns:
             Confirmation message
         """
-        return manager.replace_lines(path, start, end, new_content)
+        return manager.replace_lines(path, start, end, new_content, auto_save)
     
-    async def insert_lines(path: str, after_line: int, new_content: str) -> str:
+    async def insert_lines(path: str, after_line: int, new_content: str, auto_save: bool = True) -> str:
         """Insert new content after a specific line.
         
         Args:
             path: Path to the file.
             after_line: Insert after this line number.
             new_content: Content to insert.
+            auto_save: If True, automatically save after editing (default: True).
             
         Returns:
             Confirmation message
         """
-        return manager.insert_lines(path, after_line, new_content)
+        return manager.insert_lines(path, after_line, new_content, auto_save)
     
-    async def remove_lines(path: str, start: int, end: int) -> str:
+    async def remove_lines(path: str, start: int, end: int, auto_save: bool = True) -> str:
         """Remove a range of lines.
         
         Args:
             path: Path to the file.
             start: Start line number (1-indexed).
             end: End line number (inclusive).
+            auto_save: If True, automatically save after editing (default: True).
             
         Returns:
             Confirmation message
         """
-        return manager.remove_lines(path, start, end)
+        return manager.remove_lines(path, start, end, auto_save)
     
     async def replace_text_at_line(
         path: str,
         line_number: int,
         old_text: str,
         new_text: str,
-        use_regex: bool = False
+        use_regex: bool = False,
+        auto_save: bool = True
     ) -> str:
         """Replace text at a specific line using pattern matching.
         
@@ -398,7 +437,7 @@ def get_module():
         Returns:
             Confirmation message with what was replaced.
         """
-        return manager.replace_text_at_line(path, line_number, old_text, new_text, use_regex)
+        return manager.replace_text_at_line(path, line_number, old_text, new_text, use_regex, auto_save)
     
     async def save_file(path: str) -> str:
         """Save an open file's in-memory changes to disk.
