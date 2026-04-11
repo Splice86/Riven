@@ -81,7 +81,8 @@ async def run_repl(core_name: str) -> None:
     print(f"Using core: {display_name}")
     print(f"Tools loaded: {list(core._modules.all().keys())}")
     print(f"Memory DB: {core.db_name}")
-    print("Riven agent ready. Type '/exit' to stop.\n")
+    print(f"Session: {core.get_session_id()[:8]}...")
+    print("Riven agent ready. Type '/exit' to stop, '/clear' to reset session.\n")
     
     while True:
         try:
@@ -105,6 +106,14 @@ async def run_repl(core_name: str) -> None:
                 print("Goodbye!")
                 _processing = False
                 break
+            
+            # Handle /clear command - reset session
+            if prompt.strip().lower() == '/clear':
+                new_session = core.clear_session()
+                print(f"✓ Session cleared. New session: {new_session[:8]}...")
+                _processing = False
+                print(f"{prompt_prefix} > ", end="")
+                continue
             
             # Result is already streamed to terminal
             await core.run(prompt)

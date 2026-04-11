@@ -78,22 +78,37 @@ class MemoryClient:
     def __init__(self, db_name: str = "default", base_url: str = MEMORY_API_URL):
         self.db_name = db_name or DEFAULT_DB
         self.base_url = base_url
+        self.session_id = None  # Current session ID
     
-    def add_context(self, role: str, content: str, created_at: str = None) -> dict:
+    def new_session(self) -> str:
+        """Create a new session and return the session_id."""
+        resp = requests.post(
+            f"{self.base_url}/session/new",
+            params={"db_name": self.db_name}
+        )
+        resp.raise_for_status()
+        self.session_id = resp.json().get("session_id")
+        return self.session_id
+    
+    def add_context(self, role: str, content: str, created_at: str = None, session_id: str = None) -> dict:
         """Add a context message."""
+        # Use provided session_id or fall back to current
+        session_id = session_id or self.session_id
         resp = requests.post(
             f"{self.base_url}/context",
             params={"db_name": self.db_name},
-            json={"role": role, "content": content, "created_at": created_at}
+            json={"role": role, "content": content, "created_at": created_at, "session_id": session_id}
         )
         resp.raise_for_status()
         return resp.json()
     
-    def get_context(self, limit: int = 100) -> list[dict]:
+    def get_context(self, limit: int = 100, session_id: str = None) -> list[dict]:
         """Get context for prompt."""
+        # Use provided session_id or fall back to current
+        session_id = session_id or self.session_id
         resp = requests.get(
             f"{self.base_url}/context",
-            params={"db_name": self.db_name, "limit": limit}
+            params={"db_name": self.db_name, "limit": limit, "session_id": session_id}
         )
         resp.raise_for_status()
         return resp.json().get("context", [])
@@ -149,6 +164,9 @@ class Core:
         self._modules = ModuleRegistry()
         self._memory = MemoryClient(db_name=self.db_name, base_url=MEMORY_API_URL)
         
+        # Initialize session - create new one on start
+        self._session_id = self._memory.new_session()
+        
         # Register modules based on tool filter
         self._register_modules()
     
@@ -166,6 +184,19 @@ class Core:
     def cancel(self) -> None:
         """Cancel any ongoing operation."""
         self._cancelled = True
+    
+    def clear_session(self) -> str:
+        """Clear current session and create a new one.
+        
+        Returns:
+            The new session_id
+        """
+        self._session_id = self._memory.new_session()
+        return self._session_id
+    
+    def get_session_id(self) -> str:
+        """Get the current session_id."""
+        return self._session_id
     
     def _create_agent(self, system_prompt: str) -> Agent:
         """Create a pydantic_ai Agent."""
@@ -332,7 +363,8 @@ class Core:
                                 
                                 self._memory.add_context(
                                     "tool",
-                                    f"{tr['tool']}: {result}"
+                                    f"{tr['tool']}: {result}",
+                                    session_id=self._session_id
                                 )
                             
                         # Add newline at end of output
@@ -382,7 +414,7 @@ class Core:
         contains the converted memory context.
         """
         # Get context from memory
-        context = self._memory.get_context()
+        context = self._memory.get_context(session_id=self._session_id)
         
         if not context:
             return user_input, []
@@ -438,8 +470,8 @@ class Core:
             output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
         
         # Add user/assistant to memory after successful run
-        self._memory.add_context("user", prompt)
-        self._memory.add_context("assistant", output_text)
+        self._memory.add_context("user", prompt, session_id=self._session_id)
+        self._memory.add_context("assistant", output_text, session_id=self._session_id)
         
         return result
 
