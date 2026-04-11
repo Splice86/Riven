@@ -318,6 +318,31 @@ async def new_session(db: MemoryDB = Depends(get_db)) -> dict:
     return {"session": session}
 
 
+@app.post("/context/cluster")
+async def cluster_context(
+    target_tokens: int = Query(5000, description="Target token count for summarized context"),
+    min_live_tokens: int = Query(1000, description="Minimum tokens to keep unsummarized"),
+    session: str | None = Query(None, description="Session ID to cluster (optional)"),
+    db: MemoryDB = Depends(get_db)
+) -> dict:
+    """Force temporal clustering to reduce context to target token count.
+    
+    Continuously summarizes oldest memories until context is reduced to target,
+    while keeping at least min_live_tokens in unsummarized form.
+    
+    Args:
+        target_tokens: Target token count (default 5000)
+        min_live_tokens: Minimum tokens to keep live (default 1000)
+        session: Optional session to cluster
+        
+    Returns:
+        Iterations, memories summarized, final token count
+    """
+    from memory.context import Context
+    ctx = Context(db)
+    return ctx.force_cluster(target_tokens, min_live_tokens, session)
+
+
 @app.post("/memories/summary")
 async def add_summary(request: AddSummaryRequest, db: MemoryDB = Depends(get_db)) -> dict:
     """Add a summary memory and link it to target memories.

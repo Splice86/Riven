@@ -376,6 +376,81 @@ class Context:
         
         unsummarized.sort(key=lambda m: m["created_at"])
         return unsummarized[-limit:]
+    
+    def force_cluster(self, target_tokens: int = 5000, min_live_tokens: int = 1000, session: str = None) -> dict:
+        """Force temporal clustering to reduce context to target token count.
+        
+        Continuously summarizes oldest memories until context is reduced to target,
+        while keeping at least min_live_tokens in unsummarized form.
+        
+        Args:
+            target_tokens: Target token count for summarized context (default 5000)
+            min_live_tokens: Minimum tokens to keep unsummarized (default 1000)
+            session: Optional session to cluster
+            
+        Returns:
+            Dict withsummarized count, iterations, final_token_count
+        """
+        if min_live_tokens >= target_tokens:
+            return {"error": "min_live_tokens must be less than target_tokens"}
+        
+        iterations = 0
+        total_summarized = 0
+        
+        while True:
+            # Get current unsummarized memories
+            unsummarized = self._get_unsummarized(limit=10000, session=session)
+            
+            if not unsummarized:
+                break
+            
+            # Calculate current token count
+            current_tokens = sum(m.get("properties", {}).get("token_count", "0") for m in unsummarized)
+            try:
+                current_tokens = int(current_tokens)
+            except (ValueError, TypeError):
+                current_tokens = 0
+            
+            # Check if we're below threshold
+            if current_tokens <= target_tokens:
+                break
+            
+            # Check if we'd drop below min_live_tokens
+            if current_tokens - min_live_tokens <= 0:
+                break
+            
+            # Need more summarization - take oldest memories up to min_cluster_size
+            to_summarize = unsummarized[:self.min_cluster_size]
+            
+            if len(to_summarize) < self.min_cluster_size:
+                break
+            
+            # Summarize these
+            result = self._summarize(to_summarize, session)
+            
+            if not result.get("summarized"):
+                break
+            
+            iterations += 1
+            total_summarized += result.get("memories_summarized", 0)
+            
+            # Safety limit
+            if iterations > 20:
+                break
+        
+        # Get final token count
+        final_unsummarized = self._get_unsummarized(limit=10000, session=session)
+        final_tokens = sum(m.get("properties", {}).get("token_count", "0") for m in final_unsummarized)
+        try:
+            final_tokens = int(final_tokens)
+        except (ValueError, TypeError):
+            final_tokens = 0
+        
+        return {
+            "iterations": iterations,
+            "memories_summarized": total_summarized,
+            "final_token_count": final_tokens
+        }
 
 
 # Example usage:
