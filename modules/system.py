@@ -48,7 +48,9 @@ def get_module():
         _exit_requested.set()
         # Print goodbye immediately so user sees it
         print(f"\n{message}\n")
-        return message
+        # Force exit after current tool completes
+        import sys
+        sys.exit(0)
     
     def check_reload_modules() -> str:
         """Check if any module files have changed and need reloading.
