@@ -9,6 +9,12 @@ from typing import Any
 import requests
 import yaml
 
+# ANSI color codes for output
+GREY = "\033[90m"      # Dull grey for thinking
+WHITE = "\033[97m"     # White for replies
+LIGHT_BLUE = "\033[94m"  # Light blue for tool calls
+RESET = "\033[0m"
+
 # Global to store the last built system prompt (for debug/diagnostics)
 _current_system_prompt: str = ""
 from pydantic_ai import Agent
@@ -207,30 +213,30 @@ class Core:
                     if isinstance(event, PartStartEvent):
                         part = event.part
                         if isinstance(part, ThinkingPart):
-                            # Start of thinking - print thinking header
+                            # Start of thinking - print thinking header in grey
                             _thinking_buffer = part.content
                             if _thinking_buffer:
-                                print("\n🤔 Thinking...", flush=True)
+                                print(f"\n{GREY}🤔 Thinking...{RESET}", flush=True)
                                 _thinking_printed = True
                         elif hasattr(part, 'content'):
                             # Stream text content, converting thinking tags for display
-                            text = part.content.replace('<think>', '\nThinking: ').replace('</think>', '')
+                            text = part.content.replace('<think>', f'\n{GREY}Thinking: ').replace('</think>', f'{RESET}')
                             _streamed_text += part.content
-                            print(text, end="", flush=True)
+                            print(f"{WHITE}{text}{RESET}", end="", flush=True)
                             
                     elif isinstance(event, PartDeltaEvent):
                         delta = event.delta
                         if isinstance(delta, ThinkingPartDelta):
-                            # Streaming thinking content
+                            # Streaming thinking content in grey
                             if delta.content_delta:
                                 _thinking_buffer += delta.content_delta
                                 if _thinking_printed:
-                                    print(delta.content_delta, end="", flush=True)
+                                    print(f"{GREY}{delta.content_delta}{RESET}", end="", flush=True)
                         elif hasattr(delta, 'content_delta') and delta.content_delta:
                             # Stream text delta, converting thinking tags for display
-                            text = delta.content_delta.replace('<think>', '\nThinking: ').replace('</think>', '')
+                            text = delta.content_delta.replace('<think>', f'\n{GREY}Thinking: ').replace('</think>', f'{RESET}')
                             _streamed_text += delta.content_delta
-                            print(text, end="", flush=True)
+                            print(f"{WHITE}{text}{RESET}", end="", flush=True)
                             
                     elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
                         # End of thinking - clear buffer
@@ -257,9 +263,9 @@ class Core:
                             content = content.content
                         content_str = str(content) if content else ""
                         
-                        # Print call + result as one block
+                        # Print call + result as one block in light blue
                         if pending_tool:
-                            print(f"→ {pending_tool['name']}{pending_tool['args']}", flush=True)
+                            print(f"{LIGHT_BLUE}→ {pending_tool['name']}{pending_tool['args']}{RESET}", flush=True)
                             pending_tool = None
                         
                         # Store FULL result in memory
@@ -272,7 +278,7 @@ class Core:
                         lines = content_str.split('\n')
                         display_lines = lines[:10]  # Show first 10 lines
                         for line in display_lines:
-                            print(f"  {line}", flush=True)
+                            print(f"{LIGHT_BLUE}  {line}{RESET}", flush=True)
                         if len(lines) > 10:
                             print(f"  ... ({len(lines) - 10} more lines, {len(content_str)} total chars)", flush=True)
                         
