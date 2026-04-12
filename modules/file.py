@@ -149,7 +149,7 @@ class DocumentManager:
                 f"{MEMORY_API_URL}/memories/search",
                 params={"db_name": self._get_memory_db()},
                 json={
-                    "query": f"k:{session_id} AND k:file_record",
+                    "query": f"p:session={session_id} AND k:file_record",
                     "limit": 50
                 },
                 timeout=5
