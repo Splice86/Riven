@@ -10,3 +10,7 @@ default_core: code_hammer
 # Memory API settings
 memory_api:
   db_name: "riven"
+
+# File context settings
+file_context:
+  token_limit: 64000  # Max tokens before showing warning (default 32K)

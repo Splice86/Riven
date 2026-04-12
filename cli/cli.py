@@ -28,22 +28,23 @@ def print_banner():
         result = pyfiglet.figlet_format("RIVEN", font="slant")
         
         # Vertical gradient: dark red -> magenta -> cyan
-        gradient = [31, 31, 35, 35, 35, 36, 36, 36]  # explicit colors
+        #gradient = [31, 31, 35, 35, 35, 36, 36, 36]  # explicit colors
+        gradient = [31, 91, 35, 95,36]
         
         lines = result.split('\n')
         nonempty = [l for l in lines if l.strip()]
         num_lines = len(nonempty)
         
         for i, line in enumerate(nonempty):
-            color_idx = int(i / max(num_lines - 1, 1) * (len(gradient) - 1))
-            color_idx = min(color_idx, len(gradient) - 1)
-            color = gradient[color_idx]
+            #color_idx = int(i / max(num_lines - 1, 1) * (len(gradient) - 1))
+            #color_idx = min(color_idx, len(gradient) - 1)
+            color = gradient[i]
             print(f"\033[{color}m{line}\033[0m")
         
-        print(f"{' ' * 30}\033[95mCODEHAMMER\033[0m")
+        print(f"{' ' * 30}\033[91mCODEHAMMER\033[0m")
         print()
         print(f"{CYAN}┌────────────────────────────────────────┐{RESET}")
-        print(f"{CYAN}│{RESET}{MAGENTA}        {TAGLINE}{CYAN}{' ' * 10}{RESET}{CYAN}│{RESET}")
+        print(f"{CYAN}│{RESET}{MAGENTA}        {TAGLINE}{CYAN}{' ' * 7}{RESET}{CYAN}│{RESET}")
         print(f"{CYAN}└────────────────────────────────────────┘{RESET}")
     except ImportError:
         print("RIVEN")
@@ -79,6 +80,7 @@ def print_streamed(text: str):
                 print(f"{GREY}{text[:end]}{RESET}", end="", flush=True)
                 text = text[end + len('</think>'):]
                 in_thinking = False
+                print()  # newline after thinking
             else:
                 print(f"{GREY}{text}{RESET}", end="", flush=True)
                 break
@@ -90,6 +92,7 @@ def print_streamed(text: str):
                 print(f"{YELLOW}{tool_buffer}{RESET}", end="", flush=True)
                 tool_buffer = ""
                 in_tool = False
+                print()  # newline after tool
             else:
                 tool_buffer += text
                 break
@@ -135,16 +138,24 @@ def main():
         print(f"  python -m uvicorn api:app")
         sys.exit(1)
     
-    # Create session
-    result = client.create_session(core_name="code_hammer")
+    # Try to resume saved session, or create new one
+    result = client.resume_session(core_name="code_hammer")
+    if not result:
+        result = client.create_session(core_name="code_hammer")
+        client.save_session()
     
     if not result.get("ok"):
         print(f"{RED}Error: {result.get('message')}{RESET}")
         sys.exit(1)
     
     session = result["session_id"]
+    resumed = result.get("resumed", False)
+    
     print(f"Using core: code_hammer")
-    print(f"Session: {session[:8]}")
+    if resumed:
+        print(f"Session: {session[:8]} (resumed)")
+    else:
+        print(f"Session: {session[:8]}")
     print("Riven agent ready. Type '/exit' to stop, '/clear' to reset session.\n")
     
     prompt_prefix = get_prompt_prefix("code_hammer")
@@ -162,7 +173,9 @@ def main():
             
             if user_input.lower() == '/clear':
                 client.close_session()
+                client.delete_saved_session()
                 result = client.create_session(core_name="code_hammer")
+                client.save_session()
                 session = result["session_id"]
                 print(f"✓ Session cleared. New session: {session[:8]}")
                 continue
@@ -178,8 +191,8 @@ def main():
     except EOFError:
         print("\nGoodbye!")
     finally:
-        client.close_session()
-        print("Disconnected")
+        # Keep session alive for persistence - don't close on exit
+        print("Disconnected (session preserved)")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,9 @@ from typing import Optional, List, Dict
 RED = "\033[91m"
 RESET = "\033[0m"
 
+# Session file location
+SESSION_FILE = os.path.expanduser("~/.riven_session")
+
 
 # ============== CONFIG ==============
 
@@ -112,6 +115,7 @@ class RivenClient:
                                             output += token[:end]
                                             token = token[end + 8:]
                                             in_thinking = False
+                                            print()  # newline after thinking
                                         else:
                                             print(f"{GREY}{token}{RESET}", end="", flush=True)
                                             output += token
@@ -125,6 +129,7 @@ class RivenClient:
                                             output += tool_buffer
                                             tool_buffer = ""
                                             in_tool = False
+                                            print()  # newline after tool
                                         else:
                                             tool_buffer += token
                                             break
@@ -133,7 +138,7 @@ class RivenClient:
                                         if start != -1:
                                             print(f"{CYAN}{token[:start]}{RESET}", end="", flush=True)
                                             output += token[:start]
-                                            token = token[start + 8:]
+                                            token = token[start + 7:]
                                             in_thinking = True
                                         else:
                                             start = token.find('<tool>')
@@ -176,6 +181,32 @@ class RivenClient:
         resp.raise_for_status()
         return resp.json().get("sessions", [])
     
+    def save_session(self) -> None:
+        """Save session ID to file for persistence across CLI restarts."""
+        if self.session_id:
+            with open(SESSION_FILE, 'w') as f:
+                f.write(self.session_id)
+
+    def load_session(self) -> Optional[str]:
+        """Load saved session ID from file if it exists."""
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE) as f:
+                return f.read().strip()
+        return None
+
+    def delete_saved_session(self) -> None:
+        """Delete saved session file (used on /clear)."""
+        if os.path.exists(SESSION_FILE):
+            os.remove(SESSION_FILE)
+
+    def session_exists(self, session_id: str) -> bool:
+        """Check if a session still exists on the server."""
+        try:
+            resp = requests.get(f"{self.base_url}/api/v1/sessions/{session_id}")
+            return resp.status_code == 200
+        except:
+            return False
+
     def close_session(self) -> None:
         """Close the current session."""
         if self.session_id:
@@ -184,6 +215,29 @@ class RivenClient:
             except:
                 pass
             self.session_id = None
+
+    def resume_session(self, core_name: str = "code_hammer") -> Optional[Dict]:
+        """Try to resume a saved session if it exists on server.
+        
+        Returns session result if successful, None if not.
+        """
+        saved_id = self.load_session()
+        if not saved_id:
+            return None
+        
+        # Verify session still exists on server
+        if self.session_exists(saved_id):
+            self.session_id = saved_id
+            return {
+                "session_id": saved_id,
+                "core_name": core_name,
+                "ok": True,
+                "resumed": True
+            }
+        
+        # Session file exists but session is gone on server (server restart)
+        self.delete_saved_session()
+        return None
 
 
 # ============== CONVENIENCE ==============

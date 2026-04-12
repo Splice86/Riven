@@ -64,7 +64,7 @@ def list_sessions():
 @app.get("/api/v1/sessions/{session_id}")
 def get_session(session_id: str):
     """Get session info."""
-    if not manager.exists(session_id):
+    if not manager.session_exists(session_id):
         raise HTTPException(404, "Session not found")
     return {
         "session_id": session_id,

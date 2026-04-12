@@ -9,6 +9,7 @@ import threading
 import queue
 from typing import Optional, List, Dict
 from core import get_core
+from riven_secrets import get_memory_api, get_secret
 
 
 # ============== CORE INSTANCE (threaded mode) ==============
@@ -34,6 +35,7 @@ class CoreManager:
         self._cores: Dict[str, Dict] = {}  # name -> config
         self._current_session: Optional[str] = None
         self._instances: Dict[str, CoreInstance] = {}  # session_id -> instance
+        self._active_sessions: set = set()  # Track active session IDs
         self._lock = threading.Lock()
         self._mode: str = "threaded"  # "threaded" or "simple"
         self._load_cores()
@@ -78,6 +80,11 @@ class CoreManager:
         """Check if a core exists."""
         return name in self._cores
     
+    def session_exists(self, session_id: str) -> bool:
+        """Check if a session is active."""
+        with self._lock:
+            return session_id in self._instances
+    
     def get_current(self) -> Optional[str]:
         """Get the current session ID."""
         return self._current_session
@@ -88,8 +95,8 @@ class CoreManager:
         return f"Switched to session {session_id}"
     
     def start(self, session_id: str = None, core_name: str = None,
-              memory_api_url: str = "http://localhost:8030",
-              default_db: str = "riven") -> Dict:
+              memory_api_url: str = None,
+              default_db: str = None) -> Dict:
         """Start a new session."""
         # Load default core from config if not provided
         if core_name is None:
@@ -109,6 +116,10 @@ class CoreManager:
             session_id = str(uuid.uuid4())
         
         self._current_session = session_id
+        
+        # Track this session as active
+        with self._lock:
+            self._active_sessions.add(session_id)
         
         if self._mode == "threaded":
             # Threaded mode: spawn background thread
@@ -268,6 +279,9 @@ class CoreManager:
             
             if self._current_session == session_id:
                 self._current_session = None
+            
+            # Remove from active sessions
+            self._active_sessions.discard(session_id)
         
         return {"message": f"Session {session_id} stopped", "ok": True}
     

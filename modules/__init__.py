@@ -19,6 +19,7 @@ class Module:
     functions: dict[str, Callable] = field(default_factory=dict)  # Required if enrollment present
     get_context: Callable[[], Any] | None = None  # Required if tag present
     tag: str | None = None  # Required if get_context present
+    _session_id: str = ""  # Required - set at registration
     
     def __post_init__(self):
         has_functions = bool(self.functions)
@@ -48,12 +49,13 @@ class ModuleRegistry:
         self._modules: dict[str, Module] = {}
         self._enrolled: bool = False
     
-    def register(self, module: Module) -> None:
-        """Register a module.
+    def register(self, module: Module, session_id: str) -> None:
+        """Register a module with session_id.
         
         If module has enrollment, it will be called.
         """
         self._modules[module.name] = module
+        module._session_id = session_id
         
         # Run enrollment if present
         if module.enrollment:

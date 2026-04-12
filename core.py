@@ -191,9 +191,9 @@ class Core:
         for module in all_modules:
             # Handle "all" case
             if self._tool_filter is None or 'all' in self._tool_filter:
-                self._modules.register(module)
+                self._modules.register(module, session_id=self._session_id)
             elif module.name in self._tool_filter:
-                self._modules.register(module)
+                self._modules.register(module, session_id=self._session_id)
 
     
     def cancel(self) -> None:
@@ -235,9 +235,9 @@ class Core:
         try:
             from modules.file import is_dirty as file_is_dirty, clear_dirty as file_clear_dirty
             if file_is_dirty():
-                # Force refresh file context
+                # Force refresh file context - pass session_id for session-aware file tracking
                 from modules.file import get_module as get_file_module
-                file_module = get_file_module()
+                file_module = get_file_module(session_id=self._session_id)
                 if hasattr(file_module, 'get_context'):
                     # This will trigger refresh and clear dirty flag
                     _ = file_module.get_context()
