@@ -12,7 +12,8 @@ venv/
 # IDE
 .idea/
 .vscode/
-
+,idea
+__pycache__
 # OS
 .DS_Store
 
