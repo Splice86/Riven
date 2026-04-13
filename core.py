@@ -329,6 +329,8 @@ class Core:
                     part = event.part
                     if isinstance(part, ThinkingPart):
                         _thinking_buffer = part.content
+                        if part.content:
+                            yield {"token": f"<think>{part.content}"}  # Opening tag only
                     elif hasattr(part, 'content') and part.content:
                         _streamed_text += part.content
                         yield {"token": part.content}
@@ -338,11 +340,13 @@ class Core:
                     if isinstance(delta, ThinkingPartDelta):
                         if delta.content_delta:
                             _thinking_buffer += delta.content_delta
+                            yield {"token": delta.content_delta}  # Content only, no tags
                     elif hasattr(delta, 'content_delta') and delta.content_delta:
                         _streamed_text += delta.content_delta
                         yield {"token": delta.content_delta}
                         
                 elif isinstance(event, PartEndEvent) and isinstance(event.part, ThinkingPart):
+                    yield {"token": "</think>"}  # Closing tag only
                     _thinking_buffer = ""
                     
                 elif isinstance(event, FunctionToolCallEvent):

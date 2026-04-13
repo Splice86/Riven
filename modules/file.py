@@ -85,12 +85,23 @@ def _delete_memory(memory_id: str) -> None:
         pass
 
 
-def get_module(session_id: str):
+def get_module(session_id: str = None):
     """Get the file module.
     
     Args:
-        session_id: The session ID passed during enrollment
+        session_id: Optional session ID. Will be overwritten by registry.register().
     """
+    
+    # Create a container that will hold the session_id
+    # Functions will reference this, and register() will update it
+    class SessionContainer:
+        _session_id = session_id or "default"
+    
+    _session = SessionContainer()
+    
+    # Helper to get session_id (prefers _session._session_id set by register())
+    def _get_session_id():
+        return _session._session_id
     
     # --- Tool Functions ---
 
@@ -119,7 +130,7 @@ def get_module(session_id: str):
                 params={"db_name": DEFAULT_DB},
                 json={
                     "content": f"open: {filename}",
-                    "keywords": [session_id, "file"],
+                    "keywords": [_get_session_id(), "file"],
                     "properties": {
                         "path": abs_path,
                         "filename": filename,
@@ -207,7 +218,7 @@ def get_module(session_id: str):
         """
         name = os.path.basename(filename)
         
-        memories = _search_memories(session_id, f"p:filename={name}", limit=1)
+        memories = _search_memories(_get_session_id(), f"p:filename={name}", limit=1)
         
         if memories:
             _delete_memory(memories[0]['id'])
@@ -221,7 +232,7 @@ def get_module(session_id: str):
         Returns:
             Confirmation message with count
         """
-        memories = _search_memories(session_id, "k:file", limit=100)
+        memories = _search_memories(_get_session_id(), "k:file", limit=100)
         
         count = 0
         for mem in memories:
@@ -290,7 +301,7 @@ def get_module(session_id: str):
 """
         
         # Search memory DB for open files
-        memories = _search_memories(session_id, "k:file", limit=50)
+        memories = _search_memories(_get_session_id(), "k:file", limit=50)
         
         if not memories:
             return instructions + "\n\nNo files currently open"
@@ -336,7 +347,7 @@ def get_module(session_id: str):
         
         return "\n".join(lines)
 
-    # Create module
+    # Create module with all fields at once (avoids __post_init__ validation issues)
     module = Module(
         name="file",
         enrollment=lambda: None,
@@ -350,5 +361,8 @@ def get_module(session_id: str):
         get_context=get_context,
         tag="file"
     )
+    
+    # Store session container for later update by register()
+    module._session_container = _session
     
     return module

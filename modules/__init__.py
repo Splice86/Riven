@@ -57,6 +57,10 @@ class ModuleRegistry:
         self._modules[module.name] = module
         module._session_id = session_id
         
+        # Update session container if module has one (for session-aware modules)
+        if hasattr(module, '_session_container'):
+            module._session_container._session_id = session_id
+        
         # Run enrollment if present
         if module.enrollment:
             module.enrollment()
