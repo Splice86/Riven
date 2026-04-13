@@ -8,7 +8,6 @@ Riven is a project to help me test ideas about AI and a space for me to creative
 I have restarted this project many times and it has evolved through different functions along the way.
 With that in mind, use at your own risk! It is half finished, buggy and likely to break on you.
 
-
 This is an art project, not a tool. 
 This is intended to entertain, outrage, delight, and offend.
 It is being developed with no consideration for security, reliability, safety, or hurt feelings.
