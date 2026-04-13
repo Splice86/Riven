@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+__pycache__
 *.pyc
 *.pyo
 *.egg-info/
@@ -12,8 +13,7 @@ venv/
 # IDE
 .idea/
 .vscode/
-,idea
-__pycache__
+.idea
 # OS
 .DS_Store
 
