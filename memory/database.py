@@ -263,7 +263,7 @@ class MemoryDB:
         Args:
             memory_id: The ID of the memory to update
             properties: Dict of properties to update
-            keywords: List of keywords to set
+            keywords: List of keywords to set (replaces existing)
             
         Returns:
             Updated memory dict, or None if not found
@@ -285,19 +285,45 @@ class MemoryDB:
                     conn.execute(
                         """INSERT OR REPLACE INTO properties (memory_id, key, value) 
                            VALUES (?, ?, ?)""",
-                        (memory_id, key, value)
+                        (memory_id, key.lower().strip(), value)
                     )
             
             # Update keywords
             if keywords is not None:
-                # Remove existing keywords
+                # Remove existing keyword links
                 conn.execute("DELETE FROM memory_keywords WHERE memory_id = ?", (memory_id,))
-                # Add new keywords
-                for kw in keywords:
+                
+                # Add new keywords (same logic as add_memory)
+                unique_keywords = set(kw.lower().strip() for kw in keywords if kw.strip())
+                
+                for kw in unique_keywords:
+                    # Get or create keyword
+                    kw_row = conn.execute(
+                        "SELECT id FROM keywords WHERE name = ?", (kw,)
+                    ).fetchone()
+                    
+                    if kw_row is None:
+                        # Insert new keyword with embedding
+                        kw_embedding = self.embedding.get(kw)
+                        cursor = conn.execute(
+                            "INSERT INTO keywords (name, embedding) VALUES (?, ?)",
+                            (kw, kw_embedding.tobytes())
+                        )
+                        kw_id = cursor.lastrowid
+                    else:
+                        kw_id = kw_row[0]
+                    
+                    # Link memory to keyword
                     conn.execute(
-                        "INSERT INTO memory_keywords (memory_id, keyword) VALUES (?, ?)",
-                        (memory_id, kw)
+                        "INSERT OR IGNORE INTO memory_keywords (memory_id, keyword_id) VALUES (?, ?)",
+                        (memory_id, kw_id)
                     )
+            
+            # Update last_updated timestamp
+            conn.execute(
+                "UPDATE memories SET last_updated = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), memory_id)
+            )
             
             conn.commit()
             

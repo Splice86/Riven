@@ -1,6 +1,7 @@
 """Memory module for riven - calls memory API."""
 
 import os
+import requests
 from typing import Optional
 
 from modules import Module
@@ -53,7 +54,6 @@ def get_module():
             "last N days", "last N hours"
             "YYYY-MM-DD to YYYY-MM-DD"
         """
-        import requests
         resp = requests.post(
             f"{MEMORY_API_URL}/memories/search",
             params={"db_name": DEFAULT_DB},
@@ -88,7 +88,6 @@ def get_module():
         Returns:
             Confirmation message with memory ID and content preview
         """
-        import requests
         resp = requests.post(
             f"{MEMORY_API_URL}/memories",
             params={"db_name": DEFAULT_DB},
@@ -108,7 +107,6 @@ def get_module():
         Returns:
             Full memory details including content, creation time, and keywords
         """
-        import requests
         resp = requests.get(
             f"{MEMORY_API_URL}/memories/{memory_id}",
             params={"db_name": DEFAULT_DB}
@@ -126,7 +124,6 @@ def get_module():
     
     async def list_memories(limit: int = 20) -> str:
         """List all memories."""
-        import requests
         resp = requests.get(
             f"{MEMORY_API_URL}/memories",
             params={"db_name": DEFAULT_DB, "limit": limit}
@@ -146,7 +143,6 @@ def get_module():
     
     async def get_memory_stats() -> str:
         """Get memory database statistics."""
-        import requests
         resp = requests.get(
             f"{MEMORY_API_URL}/stats",
             params={"db_name": DEFAULT_DB}
@@ -165,8 +161,7 @@ def get_module():
         Returns:
             Confirmation message with link details
         """
-        import requests
-        resp = requests.post(
+        resp = requests.put(
             f"{MEMORY_API_URL}/memories/link",
             params={"db_name": DEFAULT_DB},
             json={"source_id": source_id, "target_id": target_id, "link_type": link_type}
@@ -183,7 +178,6 @@ def get_module():
         Returns:
             Confirmation message
         """
-        import requests
         resp = requests.delete(
             f"{MEMORY_API_URL}/memories/{memory_id}",
             params={"db_name": DEFAULT_DB}
@@ -207,7 +201,6 @@ def get_module():
         Returns:
             Confirmation message with updated memory info
         """
-        import requests
         resp = requests.put(
             f"{MEMORY_API_URL}/memories/{memory_id}",
             params={"db_name": DEFAULT_DB},
@@ -231,7 +224,6 @@ def get_module():
         Returns:
             Query results or row count
         """
-        import requests
         resp = requests.post(
             f"{MEMORY_API_URL}/db/execute",
             params={"db_name": DEFAULT_DB},
@@ -255,25 +247,7 @@ def get_module():
         else:
             return f"Executed. {result.get('rows_affected')} rows affected."
     
-    async def get_recent_context(hours: int = 24, limit: int = 5) -> str:
-        """Get recent memories for context."""
-        import requests
-        resp = requests.post(
-            f"{MEMORY_API_URL}/memories/search",
-            params={"db_name": DEFAULT_DB},
-            json={"query": f"d:last {hours} hours", "limit": limit}
-        )
-        results = resp.json().get("memories", [])
-        if not results:
-            return "No recent memories."
-        
-        lines = ["## Recent Memories"]
-        for m in results:
-            content = m.get("content", "")[:150]
-            created = m.get("created_at", "")[:19]
-            lines.append(f"- [{created}]: {content}")
-        
-        return "\n".join(lines)
+
     
     return Module(
         name="memory",
@@ -288,6 +262,5 @@ def get_module():
             "delete_memory": delete_memory,
             "update_memory": update_memory,
             "execute_sql": execute_sql,
-            "get_recent_context": get_recent_context,
         }
     )
