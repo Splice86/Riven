@@ -237,13 +237,26 @@ class Core:
         return prompt
     
     def _save_system_prompt(self, prompt: str) -> None:
-        """Save system prompt to session debug file."""
+        """Save system prompt to session debug file with timestamp."""
         import os
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         debug_dir = os.path.expanduser(f"~/.riven/sessions/{self._session_id}")
         os.makedirs(debug_dir, exist_ok=True)
-        with open(os.path.join(debug_dir, "system_prompt.txt"), "w") as f:
+        
+        filename = f"system_prompt_{timestamp}.txt"
+        filepath = os.path.join(debug_dir, filename)
+        with open(filepath, "w") as f:
             f.write(prompt)
-        logger.debug(f"Saved system prompt ({len(prompt)} chars) to {debug_dir}/system_prompt.txt")
+        
+        # Also save latest without timestamp for easy access
+        latest_path = os.path.join(debug_dir, "system_prompt_latest.txt")
+        with open(latest_path, "w") as f:
+            f.write(prompt)
+        
+        import sys
+        print(f"[DEBUG] Saved system prompt ({len(prompt)} chars) to {filepath}", file=sys.stderr)
 
 
     def _build_prompt(self, user_input: str) -> tuple[str, list[ModelMessage]]:
