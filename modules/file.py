@@ -59,17 +59,38 @@ def _find_best_window(
 
 def _search_memories(session_id: str, query: str, limit: int = 50) -> list[dict]:
     """Search memory DB and return results."""
+    import sys
+    
+    # Build the actual query we'll send
+    if "k:file" in query and "k:" not in query:
+        # For file searches, use session_id + file keyword
+        search_query = f"k:{session_id} AND {query}"
+    else:
+        search_query = query
+    
+    print(f"[DEBUG] _search_memories called:", file=sys.stderr)
+    print(f"[DEBUG]   session_id: {session_id}", file=sys.stderr)
+    print(f"[DEBUG]   original query: {query}", file=sys.stderr)
+    print(f"[DEBUG]   actual search_query: {search_query}", file=sys.stderr)
+    print(f"[DEBUG]   MEMORY_API_URL: {MEMORY_API_URL}", file=sys.stderr)
+    print(f"[DEBUG]   DEFAULT_DB: {DEFAULT_DB}", file=sys.stderr)
+    
     try:
         resp = requests.post(
             f"{MEMORY_API_URL}/memories/search",
             params={"db_name": DEFAULT_DB},
-            json={"query": f"k:{session_id} AND k:file AND {query}", "limit": limit},
+            json={"query": search_query, "limit": limit},
             timeout=5
         )
+        print(f"[DEBUG]   Response status: {resp.status_code}", file=sys.stderr)
         if resp.status_code == 200:
-            return resp.json().get("memories", [])
-    except Exception:
-        pass
+            results = resp.json().get("memories", [])
+            print(f"[DEBUG]   Found {len(results)} memories", file=sys.stderr)
+            return results
+        else:
+            print(f"[DEBUG]   Response: {resp.text[:200]}", file=sys.stderr)
+    except Exception as e:
+        print(f"[DEBUG]   Exception: {e}", file=sys.stderr)
     return []
 
 
@@ -311,6 +332,7 @@ def get_module(session_id: str = None):
         from datetime import datetime
         
         session_id = _get_session_id()
+        print(f"[DEBUG] get_context called, session_id: {session_id}", file=sys.stderr)
         
         # Instructions for the AI
         instructions = f"""## File Tools
