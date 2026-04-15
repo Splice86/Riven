@@ -60,7 +60,7 @@ MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
 LLM_URL = os.environ.get("LLM_URL", get_secret('llm', 'default', 'url', default="http://localhost:8000/v1/"))
 LLM_API_KEY = os.environ.get("LLM_API_KEY", get_secret('llm', 'default', 'api_key', default="sk-dummy"))
 LLM_MODEL = os.environ.get("LLM_MODEL", get_secret('llm', 'default', 'model', default="nvidia/MiniMax-M2.5-NVFP4"))
-DEFAULT_DB = os.environ.get("MEMORY_DB", get_secret('memory_api', 'db_name', default="default"))
+DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
 MAX_OUTPUT_LINES = 1000
 
 
@@ -144,7 +144,7 @@ class Core:
             self.llm_url = os.environ.get('LLM_URL', config.get('llm_url', LLM_URL))
             self.llm_api_key = os.environ.get('LLM_API_KEY', config.get('llm_api_key', LLM_API_KEY))
             self.system_prompt = config.get('system_prompt', '')
-            self.db_name = os.environ.get('MEMORY_DB', config.get('memory_db', DEFAULT_DB))
+            self.db_name = os.environ.get('MEMORY_DB', config.get('memory_api', {}).get('db_name', DEFAULT_DB))
             self._tool_filter = config.get('tools', None)
             self.tool_timeout = config.get('tool_timeout', 20)
             self.strip_thinking = config.get('strip_thinking', False)

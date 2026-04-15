@@ -33,8 +33,8 @@ except ImportError:
 
 app = FastAPI(title="Riven Memory API")
 
-# Default DB name
-DEFAULT_DB = "default.db"
+# Default DB name - read from config like the rest of the app
+DEFAULT_DB = CONFIG.get('memory_api', {}).get('db_name', 'riven')
 
 def get_db_path(db_name: str) -> str:
     """Get full path for a DB file."""

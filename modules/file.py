@@ -13,18 +13,21 @@ except ImportError:
     HAS_JELLYFISH = False
 
 from modules import Module
-from riven_secrets import get_memory_api, get_secret
+from riven_secrets import get_memory_api
+
+# Load config - same pattern as other modules
+import yaml
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+try:
+    with open(CONFIG_PATH) as f:
+        CONFIG = yaml.safe_load(f)
+except Exception:
+    CONFIG = {}
 
 
 # Memory API configuration
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
-DEFAULT_DB = os.environ.get("MEMORY_DB", get_secret('memory_api', 'db_name', default="default"))
-
-# DEBUG: Log what DB we're using
-import sys
-print(f"[FILE] MODULE INIT: MEMORY_API_URL={MEMORY_API_URL}", file=sys.stderr, flush=True)
-print(f"[FILE] MODULE INIT: DEFAULT_DB={DEFAULT_DB}", file=sys.stderr, flush=True)
-print(f"[FILE] MODULE INIT: MEMORY_DB env={os.environ.get('MEMORY_DB', 'NOT SET')}", file=sys.stderr, flush=True)
+DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
 
 
 def _count_tokens(text: str) -> int:
@@ -65,35 +68,19 @@ def _find_best_window(
 
 def _search_memories(session_id: str, query: str, limit: int = 50) -> list[dict]:
     """Search memory DB and return results."""
-    import sys
-    
-    # Always prefix with session_id to scope searches
     search_query = f"k:{session_id} AND {query}"
     
-    print(f"[FILE] _search_memories called:", file=sys.stderr, flush=True)
-    print(f"[FILE]   session_id: {session_id}", file=sys.stderr, flush=True)
-    print(f"[FILE]   query: {query}", file=sys.stderr, flush=True)
-    print(f"[FILE]   search_query: {search_query}", file=sys.stderr, flush=True)
-    print(f"[FILE]   API URL: {MEMORY_API_URL}/memories/search", file=sys.stderr, flush=True)
-    print(f"[FILE]   DB: {DEFAULT_DB}", file=sys.stderr, flush=True)
-    
     try:
-        url = f"{MEMORY_API_URL}/memories/search"
-        params = {"db_name": DEFAULT_DB}
-        payload = {"query": search_query, "limit": limit}
-        print(f"[FILE]   Making request to {url} with params={params} body={payload}", file=sys.stderr, flush=True)
-        resp = requests.post(url, params=params, json=payload, timeout=5)
-        print(f"[FILE]   Response status: {resp.status_code}", file=sys.stderr, flush=True)
-        print(f"[FILE]   Response body: {resp.text[:500]}", file=sys.stderr, flush=True)
+        resp = requests.post(
+            f"{MEMORY_API_URL}/memories/search",
+            params={"db_name": DEFAULT_DB},
+            json={"query": search_query, "limit": limit},
+            timeout=5
+        )
         if resp.status_code == 200:
-            data = resp.json()
-            results = data.get("memories", [])
-            print(f"[FILE]   Found {len(results)} memories", file=sys.stderr, flush=True)
-            return results
-        else:
-            print(f"[FILE]   Response: {resp.text[:200]}", file=sys.stderr, flush=True)
-    except Exception as e:
-        print(f"[FILE]   Exception: {e}", file=sys.stderr, flush=True)
+            return resp.json().get("memories", [])
+    except Exception:
+        pass
     return []
 
 
@@ -331,25 +318,8 @@ def get_module(session_id: str = None):
         Queries memory DB for file records with session_id, then loads
         the actual file content from disk.
         """
-        import sys
-        from datetime import datetime
-        
         session_id = _get_session_id()
         
-        # DEBUG: Write to file immediately to verify function is called
-        try:
-            debug_dir = os.path.expanduser(f"~/.riven/sessions/{session_id}")
-            os.makedirs(debug_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            with open(os.path.join(debug_dir, f"get_context_called_{timestamp}.txt"), "w") as f:
-                f.write(f"get_context called at {timestamp}\n")
-                f.write(f"session_id: {session_id}\n")
-        except Exception as e:
-            print(f"[FILE] DEBUG FILE WRITE FAILED: {e}", file=sys.stderr, flush=True)
-        
-        print(f"[FILE] get_context called, session_id: {session_id}", file=sys.stderr, flush=True)
-        
-        # Instructions for the AI
         instructions = f"""## File Tools
 
 ### Workflow
@@ -370,35 +340,18 @@ def get_module(session_id: str = None):
         # Search memory DB for open files
         memories = _search_memories(session_id, "k:file", limit=50)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        debug_lines = [f"[DEBUG] File context at {timestamp}",
-                       f"[DEBUG] Session ID: {session_id}",
-                       f"[DEBUG] Found {len(memories)} open files in memory DB"]
-        
         if not memories:
-            result = instructions + "\n\nNo files currently open"
-            debug_lines.append("[DEBUG] Returning: 'No files currently open'")
-            print("\n".join(debug_lines), file=sys.stderr)
-            return result
+            return instructions + "\n\nNo files currently open"
         
         # Build context from disk
         lines = [instructions, "", "=== Open Files ==="]
         total_tokens = 0
-        files_included = []
         
         for mem in memories:
             props = mem.get("properties", {})
             path = props.get("path")
-            filename = props.get("filename", os.path.basename(path) if path else "unknown")
             
-            debug_lines.append(f"[DEBUG] Checking file: {filename} at {path}")
-            
-            if not path:
-                debug_lines.append(f"[DEBUG]   -> No path in properties, skipping")
-                continue
-            
-            if not os.path.exists(path):
-                debug_lines.append(f"[DEBUG]   -> File does not exist, skipping")
+            if not path or not os.path.exists(path):
                 continue
             
             try:
@@ -407,48 +360,25 @@ def get_module(session_id: str = None):
                 
                 # Apply line range if specified
                 line_start = props.get("line_start", "0")
-                line_end = props.get("line_end", "*")  # Default to "*" means no end
+                line_end = props.get("line_end", "*")
                 
                 start = int(line_start) if line_start != "0" else 0
                 if line_end and line_end != "*":
-                    end = int(line_end)
                     content_lines = content.splitlines(keepends=True)
-                    content = ''.join(content_lines[start:end])
+                    content = ''.join(content_lines[start:int(line_end)])
                 
                 filename = os.path.basename(path)
                 end_display = line_end if line_end != "*" else "end"
                 lines.append(f"\n=== {filename} [lines {line_start}-{end_display}] ===")
                 lines.append(content)
                 total_tokens += _count_tokens(content)
-                files_included.append(filename)
-                debug_lines.append(f"[DEBUG]   -> Included {len(content)} chars")
-                
-            except Exception as e:
-                debug_lines.append(f"[DEBUG]   -> Error: {e}")
+            except Exception:
                 continue
         
-        # Token count
         lines.append(f"\n\n--- File Context Stats ---")
         lines.append(f"Total open file tokens: {total_tokens:,}")
         
-        result = "\n".join(lines)
-        debug_lines.append(f"[DEBUG] Files included in context: {files_included}")
-        debug_lines.append(f"[DEBUG] Total result size: {len(result)} chars")
-        print("\n".join(debug_lines), file=sys.stderr, flush=True)
-
-        # DEBUG: Write result to file
-        try:
-            debug_dir = os.path.expanduser(f"~/.riven/sessions/{session_id}")
-            os.makedirs(debug_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = os.path.join(debug_dir, f"file_module_{timestamp}.txt")
-            with open(filepath, "w") as f:
-                f.write(result)
-            print(f"[FILE] DEBUG: Wrote result to {filepath}", file=sys.stderr, flush=True)
-        except Exception as e:
-            print(f"[FILE] DEBUG FILE WRITE FAILED: {e}", file=sys.stderr, flush=True)
-        
-        return result
+        return "\n".join(lines)
 
     # Create module with all fields at once (avoids __post_init__ validation issues)
     module = Module(
