@@ -20,6 +20,12 @@ from riven_secrets import get_memory_api, get_secret
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
 DEFAULT_DB = os.environ.get("MEMORY_DB", get_secret('memory_api', 'db_name', default="default"))
 
+# DEBUG: Log what DB we're using
+import sys
+print(f"[FILE] MODULE INIT: MEMORY_API_URL={MEMORY_API_URL}", file=sys.stderr, flush=True)
+print(f"[FILE] MODULE INIT: DEFAULT_DB={DEFAULT_DB}", file=sys.stderr, flush=True)
+print(f"[FILE] MODULE INIT: MEMORY_DB env={os.environ.get('MEMORY_DB', 'NOT SET')}", file=sys.stderr, flush=True)
+
 
 def _count_tokens(text: str) -> int:
     """Rough token count - ~4 chars per token."""
@@ -68,14 +74,15 @@ def _search_memories(session_id: str, query: str, limit: int = 50) -> list[dict]
     print(f"[FILE]   session_id: {session_id}", file=sys.stderr, flush=True)
     print(f"[FILE]   query: {query}", file=sys.stderr, flush=True)
     print(f"[FILE]   search_query: {search_query}", file=sys.stderr, flush=True)
+    print(f"[FILE]   API URL: {MEMORY_API_URL}/memories/search", file=sys.stderr, flush=True)
+    print(f"[FILE]   DB: {DEFAULT_DB}", file=sys.stderr, flush=True)
     
     try:
-        resp = requests.post(
-            f"{MEMORY_API_URL}/memories/search",
-            params={"db_name": DEFAULT_DB},
-            json={"query": search_query, "limit": limit},
-            timeout=5
-        )
+        url = f"{MEMORY_API_URL}/memories/search"
+        params = {"db_name": DEFAULT_DB}
+        payload = {"query": search_query, "limit": limit}
+        print(f"[FILE]   Making request to {url} with params={params} body={payload}", file=sys.stderr, flush=True)
+        resp = requests.post(url, params=params, json=payload, timeout=5)
         print(f"[FILE]   Response status: {resp.status_code}", file=sys.stderr, flush=True)
         print(f"[FILE]   Response body: {resp.text[:500]}", file=sys.stderr, flush=True)
         if resp.status_code == 200:
