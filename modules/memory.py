@@ -1,25 +1,13 @@
 """Memory module for riven - calls memory API."""
 
-import os
 import requests
 from typing import Optional
 
 from modules import Module
+from riven_config import config
 
-# Load config - same as core.py
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
-try:
-    import yaml
-    with open(CONFIG_PATH) as f:
-        CONFIG = yaml.safe_load(f)
-except Exception:
-    CONFIG = {}
-
-from riven_secrets import get_memory_api
-MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
-
-# Database name - set from config, not overrideable via tools
-DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
+MEMORY_API_URL = config.get('memory_api.url', 'http://127.0.0.1:8030')
+DEFAULT_DB = config.get('memory_api.db_name', 'riven')
 
 
 def get_module():

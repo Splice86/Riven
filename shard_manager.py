@@ -1,82 +1,83 @@
-"""Core Manager - supports both simple (per-message) and threaded (persistent) modes."""
+"""Shard Manager - supports both simple (per-message) and threaded (persistent) modes."""
 
 import os
 import glob
+import sys
 import yaml
 import asyncio
 import threading
 import queue
 from typing import Optional, List, Dict
-from core import get_core
+from shard import get_shard
 
 
-# ============== CORE INSTANCE (threaded mode) ==============
+# ============== SHARD INSTANCE (threaded mode) ==============
 
-class CoreInstance:
-    """A running core instance with I/O queues."""
+class ShardInstance:
+    """A running shard instance with I/O queues."""
     
-    def __init__(self, session_id: str, core_name: str):
+    def __init__(self, session_id: str, shard_name: str):
         self.session_id = session_id
-        self.core_name = core_name
+        self.shard_name = shard_name
         self.input_queue: queue.Queue = queue.Queue()
         self.output_queue: queue.Queue = queue.Queue()
         self.status = "starting"
         self.thread: Optional[threading.Thread] = None
 
 
-# ============== CORE MANAGER ==============
+# ============== SHARD MANAGER ==============
 
-class CoreManager:
-    """Manages cores - supports simple and threaded modes."""
+class ShardManager:
+    """Manages shards - supports simple and threaded modes."""
     
     def __init__(self):
-        self._cores: Dict[str, Dict] = {}  # name -> config
+        self._shards: Dict[str, Dict] = {}  # name -> config
         self._current_session: Optional[str] = None
-        self._instances: Dict[str, CoreInstance] = {}  # session_id -> instance
+        self._instances: Dict[str, ShardInstance] = {}  # session_id -> instance
         self._active_sessions: set = set()  # Track active session IDs
         self._lock = threading.Lock()
         self._mode: str = "threaded"  # "threaded" or "simple"
-        self._load_cores()
+        self._load_shards()
     
-    def _load_cores(self) -> None:
-        """Load available cores from the cores/ folder."""
-        cores_dir = os.path.join(
+    def _load_shards(self) -> None:
+        """Load available shards from the shards/ folder."""
+        shards_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 
-            "cores"
+            "shards"
         )
         
-        if not os.path.exists(cores_dir):
+        if not os.path.exists(shards_dir):
             return
         
-        for filepath in glob.glob(os.path.join(cores_dir, "*.yaml")):
+        for filepath in glob.glob(os.path.join(shards_dir, "*.yaml")):
             with open(filepath) as f:
                 config = yaml.safe_load(f)
                 if config and 'name' in config:
                     name = config.pop('name')
-                    self._cores[name] = config
+                    self._shards[name] = config
     
     def set_mode(self, mode: str) -> None:
-        """Set mode: 'threaded' for persistent cores, 'simple' for create-per-message."""
+        """Set mode: 'threaded' for persistent shards, 'simple' for create-per-message."""
         self._mode = mode
     
     def list(self) -> List[Dict]:
-        """List available cores."""
+        """List available shards."""
         return [
             {
                 'name': name,
                 'display_name': config.get('display_name', name),
                 'description': config.get('description', ''),
             }
-            for name, config in self._cores.items()
+            for name, config in self._shards.items()
         ]
     
     def get(self, name: str) -> Optional[Dict]:
-        """Get core config by name."""
-        return self._cores.get(name)
+        """Get shard config by name."""
+        return self._shards.get(name)
     
     def exists(self, name: str) -> bool:
-        """Check if a core exists."""
-        return name in self._cores
+        """Check if a shard exists."""
+        return name in self._shards
     
     def session_exists(self, session_id: str) -> bool:
         """Check if a session is active."""
@@ -92,7 +93,7 @@ class CoreManager:
         self._current_session = session_id
         return f"Switched to session {session_id}"
     
-    def start(self, session_id: str, core_name: str = None) -> Dict:
+    def start(self, session_id: str, shard_name: str = None) -> Dict:
         """Start a session. Session ID must be provided by caller."""
         # Require session_id - no generation
         if not session_id:
@@ -102,16 +103,16 @@ class CoreManager:
                 "ok": False
             }
         
-        # Load default core from config if not provided
-        if core_name is None:
-            core_name = self._get_default_core()
+        # Load default shard from config if not provided
+        if shard_name is None:
+            shard_name = self._get_default_shard()
         
-        # Validate core exists
-        if core_name not in self._cores:
-            available = ", ".join(self._cores.keys())
+        # Validate shard exists
+        if shard_name not in self._shards:
+            available = ", ".join(self._shards.keys())
             return {
                 "session_id": None,
-                "message": f"Core '{core_name}' not found. Available: {available}",
+                "message": f"Shard '{shard_name}' not found. Available: {available}",
                 "ok": False
             }
         
@@ -131,12 +132,12 @@ class CoreManager:
                         "ok": True
                     }
                 
-                instance = CoreInstance(session_id, core_name)
+                instance = ShardInstance(session_id, shard_name)
                 self._instances[session_id] = instance
                 
                 # Start background thread
                 instance.thread = threading.Thread(
-                    target=self._run_core_thread,
+                    target=self._run_shard_thread,
                     args=(instance,),
                     daemon=True
                 )
@@ -152,60 +153,49 @@ class CoreManager:
             # Simple mode: just record session
             pass
         
-        display = self._cores[core_name].get('display_name', core_name)
+        display = self._shards[shard_name].get('display_name', shard_name)
         return {
             "session_id": session_id,
             "message": f"Session {session_id} ready with {display}",
             "ok": True
         }
     
-    def _run_core_thread(self, instance: CoreInstance) -> None:
-        """Run core in background thread (threaded mode)."""
-        import sys
-        print(f'[thread] Starting for {instance.session_id}', file=sys.stderr)
+    def _run_shard_thread(self, instance: ShardInstance) -> None:
+        """Run shard in background thread (threaded mode)."""
         try:
-            print(f'[thread] Creating core {instance.core_name}', file=sys.stderr)
-            core = get_core(instance.core_name, session_id=instance.session_id)
-            print(f'[thread] Core created: {core}', file=sys.stderr)
+            shard = get_shard(instance.shard_name, session_id=instance.session_id)
             instance.status = "running"
-            print(f'[thread] Status set to running', file=sys.stderr)
-            
+
             while instance.status == "running":
                 try:
                     msg = instance.input_queue.get(timeout=1)
                 except queue.Empty:
                     continue
-                
+
                 if msg is None:  # Stop signal
-                    print(f'[thread] Got stop signal', file=sys.stderr)
                     break
-                
-                print(f'[thread] Got message: {msg[:30]}...', file=sys.stderr)
+
                 try:
-                    result = asyncio.run(core.run(msg))
+                    result = asyncio.run(shard.run(msg))
                     output = str(result.output) if result and hasattr(result, 'output') else str(result)
                     instance.output_queue.put(output)
-                    print(f'[thread] Output queued', file=sys.stderr)
                 except Exception as e:
                     instance.output_queue.put(f"Error: {e}")
-                    print(f'[thread] Error: {e}', file=sys.stderr)
-                    
+
         except Exception as e:
             import traceback
-            print(f'[thread] EXCEPTION: {e}', file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
-            instance.output_queue.put(f"Core error: {e}")
+            instance.output_queue.put(f"Shard error: {e}")
         finally:
             instance.status = "stopped"
-            print(f'[thread] Stopped', file=sys.stderr)
     
-    def send(self, session_id: str, message: str, core_name: str = None) -> Dict:
+    def send(self, session_id: str, message: str, shard_name: str = None) -> Dict:
         """Send a message to a session."""
-        if core_name is None:
-            core_name = self._get_default_core()
+        if shard_name is None:
+            shard_name = self._get_default_shard()
         
-        if core_name not in self._cores:
-            return {"ok": False, "error": f"Core '{core_name}' not found"}
+        if shard_name not in self._shards:
+            return {"ok": False, "error": f"Shard '{shard_name}' not found"}
         
         self._current_session = session_id
         
@@ -221,10 +211,10 @@ class CoreManager:
             instance.input_queue.put(message)
             return {"ok": True, "queued": True}
         else:
-            # Simple: create core, run, return
+            # Simple: create shard, run, return
             try:
-                core = get_core(core_name, session_id=session_id)
-                result = asyncio.run(core.run(message))
+                shard = get_shard(shard_name, session_id=session_id)
+                result = asyncio.run(shard.run(message))
                 output = str(result.output) if result and hasattr(result, 'output') else str(result)
                 return {"ok": True, "output": output}
             except Exception as e:
@@ -250,8 +240,8 @@ class CoreManager:
         
         return messages
     
-    def _get_default_core(self) -> str:
-        """Get default core name from config."""
+    def _get_default_shard(self) -> str:
+        """Get default shard name from config."""
         config_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 
             "config.yaml"
@@ -292,7 +282,7 @@ class CoreManager:
             if inst:
                 return {
                     "session_id": inst.session_id,
-                    "core_name": inst.core_name,
+                    "shard_name": inst.shard_name,
                     "status": inst.status,
                 }
         return None
@@ -303,7 +293,7 @@ class CoreManager:
             return [
                 {
                     "session_id": inst.session_id,
-                    "core_name": inst.core_name,
+                    "shard_name": inst.shard_name,
                     "status": inst.status,
                 }
                 for inst in self._instances.values()
@@ -312,27 +302,27 @@ class CoreManager:
 
 # ============== GLOBAL INSTANCE ==============
 
-_manager: Optional[CoreManager] = None
+_manager: Optional[ShardManager] = None
 
 
-def get_manager() -> CoreManager:
-    """Get the global CoreManager instance."""
+def get_manager() -> ShardManager:
+    """Get the global ShardManager instance."""
     global _manager
     if _manager is None:
-        _manager = CoreManager()
+        _manager = ShardManager()
     return _manager
 
 
 # ============== CONVENIENCE FUNCTIONS ==============
 
-def list_cores() -> List[Dict]:
-    """List available cores."""
+def list_shards() -> List[Dict]:
+    """List available shards."""
     return get_manager().list()
 
 
-def start(session_id: str = None, core_name: str = None) -> Dict:
+def start(session_id: str = None, shard_name: str = None) -> Dict:
     """Start a new session."""
-    return get_manager().start(session_id, core_name)
+    return get_manager().start(session_id, shard_name)
 
 
 def stop(session_id: str) -> Dict:
@@ -340,9 +330,9 @@ def stop(session_id: str) -> Dict:
     return get_manager().stop(session_id)
 
 
-def send(session_id: str, message: str, core_name: str = None) -> Dict:
+def send(session_id: str, message: str, shard_name: str = None) -> Dict:
     """Send a message to a session."""
-    return get_manager().send(session_id, message, core_name)
+    return get_manager().send(session_id, message, shard_name)
 
 
 def receive(session_id: str, timeout: float = 0.1) -> List[str]:
@@ -370,6 +360,6 @@ def switch_session(session_id: str) -> str:
     return get_manager().set_current(session_id)
 
 
-def core_exists(name: str) -> bool:
-    """Check if a core exists."""
+def shard_exists(name: str) -> bool:
+    """Check if a shard exists."""
     return get_manager().exists(name)

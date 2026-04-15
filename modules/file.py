@@ -14,21 +14,10 @@ except ImportError:
     HAS_JELLYFISH = False
 
 from modules import Module
-from riven_secrets import get_memory_api
+from riven_config import config
 
-# Load config - same pattern as other modules
-import yaml
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
-try:
-    with open(CONFIG_PATH) as f:
-        CONFIG = yaml.safe_load(f)
-except Exception:
-    CONFIG = {}
-
-
-# Memory API configuration
-MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
-DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
+MEMORY_API_URL = config.get('memory_api.url', 'http://127.0.0.1:8030')
+DEFAULT_DB = config.get('memory_api.db_name', 'riven')
 
 def _count_tokens(text: str) -> int:
     """Rough token count - ~4 chars per token."""

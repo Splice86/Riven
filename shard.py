@@ -1,12 +1,11 @@
-"""Core agentic loop - pydantic_ai implementation."""
+"""Shard agentic loop - pydantic_ai implementation."""
 
-import asyncio
 import os
 import re
+import yaml
 from typing import Any
 
 import requests
-import yaml
 
 from pydantic_ai import Agent
 from pydantic_ai import AgentStreamEvent, AgentRunResultEvent
@@ -31,53 +30,29 @@ from openai import AsyncOpenAI
 
 from modules import ModuleRegistry, get_all_modules
 from tools import create_tools
+from riven_config import config
 
-# Load configuration
-def _load_config() -> dict:
-    """Load config from yaml files."""
-    config = {}
-    
-    # Try config_local.yaml first (gitignored, for local overrides)
-    for config_file in ['config_local.yaml', 'config.yaml']:
-        if os.path.exists(config_file):
-            with open(config_file) as f:
-                loaded = yaml.safe_load(f)
-                if loaded:
-                    config.update(loaded)
-    
-    return config
-
-CONFIG = _load_config()
-
-
-from riven_secrets import get_llm_config, get_memory_api
-from riven_secrets import get_secret  # LLM config only - memory API uses config.yaml
-
-# Legacy env/import fallback
-MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
-LLM_URL = os.environ.get("LLM_URL", get_secret('llm', 'default', 'url', default="http://localhost:8000/v1/"))
-LLM_API_KEY = os.environ.get("LLM_API_KEY", get_secret('llm', 'default', 'api_key', default="sk-dummy"))
-LLM_MODEL = os.environ.get("LLM_MODEL", get_secret('llm', 'default', 'model', default="nvidia/MiniMax-M2.5-NVFP4"))
-DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
+MEMORY_API_URL = config.get('memory_api.url', 'http://127.0.0.1:8030')
+DEFAULT_DB = config.get('memory_api.db_name', 'riven')
 MAX_OUTPUT_LINES = 1000
 
 
-def _resolve_core_config(core_config: dict) -> dict:
-    """Resolve llm_config: name to actual LLM values from secrets."""
-    from riven_secrets import get_llm_config
-    
-    resolved = core_config.copy()
-    
+def _resolve_shard_config(shard_config: dict) -> dict:
+    """Resolve llm_config: name to actual LLM values from config."""
+    from riven_config import config
+
+    resolved = shard_config.copy()
+
     # Handle llm_config: primary/alternate
     if 'llm_config' in resolved:
         config_name = resolved.pop('llm_config')
-        llm_cfg = get_llm_config(config_name)
-        if not llm_cfg.get('url'):
+        llm_cfg = config.get(f'llm.{config_name}.url')
+        if not llm_cfg:
             raise ValueError(f"llm_config '{config_name}' requires url in secrets.yaml")
-        resolved['llm_url'] = llm_cfg['url']
-        resolved['llm_model'] = llm_cfg['model']
-        resolved['llm_api_key'] = llm_cfg['api_key']
-    
+        resolved['llm_url'] = llm_cfg
+        resolved['llm_model'] = config.get(f'llm.{config_name}.model', 'nvidia/MiniMax-M2.5-NVFP4')
+        resolved['llm_api_key'] = config.get(f'llm.{config_name}.api_key', 'sk-dummy')
+
     return resolved
 
 
@@ -113,10 +88,10 @@ class MemoryClient:
         return resp.json().get("context", [])
 
 
-class Core:
-    """Agent core using pydantic_ai with vllm backend.
+class Shard:
+    """Agent shard using pydantic_ai with vllm backend.
     
-    Can be initialized with a config dict (from cores.yaml) or individual params.
+    Can be initialized with a config dict (from shards.yaml) or individual params.
     """
 
     def __init__(
@@ -138,20 +113,20 @@ class Core:
         # Load from config if provided
         if config:
             # Env vars take priority over config
-            self.model = os.environ.get('LLM_MODEL', config.get('llm_model', LLM_MODEL))
-            self.llm_url = os.environ.get('LLM_URL', config.get('llm_url', LLM_URL))
-            self.llm_api_key = os.environ.get('LLM_API_KEY', config.get('llm_api_key', LLM_API_KEY))
+            self.model = config.get('llm_model', config.get('llm.primary.model', 'nvidia/MiniMax-M2.5-NVFP4'))
+            self.llm_url = config.get('llm_url', config.get('llm.primary.url', 'http://127.0.0.1:8000/v1'))
+            self.llm_api_key = config.get('llm_api_key', config.get('llm.primary.api_key', 'sk-dummy'))
             self.system_prompt = config.get('system_prompt', '')
-            self.db_name = os.environ.get('MEMORY_DB', config.get('memory_api', {}).get('db_name', DEFAULT_DB))
+            self.db_name = config.get('memory_api.db_name', DEFAULT_DB)
             self._tool_filter = config.get('tools', None)
             self.tool_timeout = config.get('tool_timeout', 20)
             self.strip_thinking = config.get('strip_thinking', False)
             self.store_tool_results = config.get('store_tool_results', 0)  # 0=skip, N=store last N lines
 
         else:
-            self.model = model or LLM_MODEL
-            self.llm_url = llm_url or LLM_URL
-            self.llm_api_key = llm_api_key or LLM_API_KEY
+            self.model = model
+            self.llm_url = llm_url or config.get('llm.primary.url', 'http://127.0.0.1:8000/v1')
+            self.llm_api_key = llm_api_key or config.get('llm.primary.api_key', 'sk-dummy')
             self.system_prompt = system_prompt or ""
             self.db_name = db_name or DEFAULT_DB
             self._tool_filter = tools
@@ -231,7 +206,6 @@ class Core:
                             prompt = prompt.replace(placeholder, value)
                 except Exception:
                     pass
-        
         return prompt
 
     def _build_prompt(self, user_input: str) -> tuple[str, list[ModelMessage]]:
@@ -280,7 +254,7 @@ class Core:
         
         # Strip thinking tags
         if self.strip_thinking:
-            output_text = re.sub(r"<think>.*?</think>", "", output_text, flags=re.DOTALL).strip()
+            output_text = re.sub(r"", "", output_text, flags=re.DOTALL).strip()
         else:
             output_text = output_text.replace("<think>", "").replace("</think>", "").strip()
         
@@ -396,65 +370,61 @@ class Core:
             yield {"error": str(e)}
 
 
-def _load_cores() -> dict:
-    """Load cores from the cores/ folder."""
+def _load_shards() -> dict:
+    """Load shards from the shards/ folder."""
     import glob
     
-    cores = {}
-    cores_dir = "cores"
+    shards = {}
+    shards_dir = "shards"
     
-    if not os.path.exists(cores_dir):
-        return cores
+    if not os.path.exists(shards_dir):
+        return shards
     
-    for filepath in glob.glob(os.path.join(cores_dir, "*.yaml")):
+    for filepath in glob.glob(os.path.join(shards_dir, "*.yaml")):
         with open(filepath) as f:
-            core_config = yaml.safe_load(f)
-            if core_config and 'name' in core_config:
-                core_name = core_config.pop('name')
+            shard_config = yaml.safe_load(f)
+            if shard_config and 'name' in shard_config:
+                shard_name = shard_config.pop('name')
                 # Resolve placeholders from secrets
-                core_config = _resolve_core_config(core_config)
-                cores[core_name] = core_config
+                shard_config = _resolve_shard_config(shard_config)
+                shards[shard_name] = shard_config
     
-    return cores
+    return shards
 
 
-def get_core_display_name(core_name: str) -> str:
-    """Get the display name for a core."""
-    cores = _load_cores()
-    if core_name in cores:
-        return cores[core_name].get('display_name', core_name)
-    return core_name
+def get_shard_display_name(shard_name: str) -> str:
+    """Get the display name for a shard."""
+    shards = _load_shards()
+    if shard_name in shards:
+        return shards[shard_name].get('display_name', shard_name)
+    return shard_name
 
 
-def get_core(name: str = "code_hammer", session_id: str = None) -> Core:
-    """Factory function to create a core by name from config.
+def get_shard(name: str = "code_hammer", session_id: str = None) -> Shard:
+    """Factory function to create a shard by name from config.
     
     Args:
-        name: Name of the core in cores/ folder (default: "code_hammer")
+        name: Name of the shard in shards/ folder (default: "code_hammer")
         session_id: Session ID from client for memory persistence
     
     Returns:
-        Configured Core instance
+        Configured Shard instance
     
     Raises:
-        ValueError: If core name not found or session_id not provided
+        ValueError: If shard name not found or session_id not provided
     """
-    cores = _load_cores()
+    shards = _load_shards()
     
-    if name not in cores:
-        raise ValueError(f"Core '{name}' not found. Available: {list(cores.keys())}")
+    if name not in shards:
+        raise ValueError(f"Shard '{name}' not found. Available: {list(shards.keys())}")
     
     if not session_id:
         raise ValueError("session_id is required - must be provided by client")
     
-    # Merge global config (from config.yaml) with core config
-    # Core config takes priority
-    merged_config = {**CONFIG, **cores[name]}
-    
-    return Core(config=merged_config, session_id=session_id)
+    return Shard(config=shards[name], session_id=session_id)
 
 
 
-def list_cores() -> list[str]:
-    """List available core names from cores/ folder."""
-    return list(_load_cores().keys())
+def list_shards() -> list[str]:
+    """List available shard names from shards/ folder."""
+    return list(_load_shards().keys())

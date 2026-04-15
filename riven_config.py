@@ -1,0 +1,231 @@
+"""Riven config system - single source of truth for all configuration.
+
+Precedence (highest wins):
+    1. Env var (RV_* prefix, __ for nesting: RV_MEMORY_API__URL)
+    2. secrets.yaml (gitignored, user secrets)
+    3. secrets_template.yaml (committed baseline, falls back if no secrets.yaml)
+    4. config.yaml (application config)
+    5. Hardcoded default passed to get()
+
+Template convention:
+    If <name>_template.yaml exists, the system first looks for <name>.yaml.
+    If found, it wins; otherwise template is used as fallback.
+    Example: secrets_template.yaml → look for secrets.yaml first, fallback to template.
+"""
+
+import os
+from typing import Any
+
+
+def _find_project_root() -> str:
+    """Find the project root (where config.yaml lives)."""
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_yaml(path: str) -> dict:
+    """Load a yaml file, return empty dict on failure."""
+    if os.path.exists(path):
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f)
+            return data if data else {}
+    return {}
+
+
+def _env_override(data: dict, prefix: str = "RV") -> dict:
+    """Override dict values with matching env vars.
+
+    Env var format: RV_SECTION__KEY maps to data['section']['key'].
+    Double underscore separates nesting levels.
+    """
+    result = _deep_copy_dict(data)
+    for env_key, env_val in os.environ.items():
+        if not env_key.startswith(f"{prefix}_"):
+            continue
+        # Strip prefix and split on __
+        rest = env_key[len(prefix) + 1:]
+        parts = rest.split("__")
+        if not parts:
+            continue
+
+        # Navigate to the right nested dict
+        current = result
+        for part in parts[:-1]:
+            part = part.lower()
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+
+        # Set the final key, trying to preserve type
+        final_key = parts[-1].lower()
+        current[final_key] = _coerce(env_val)
+
+    return result
+
+
+def _deep_copy_dict(data: dict) -> dict:
+    """Deep copy a dict."""
+    import copy
+    return copy.deepcopy(data) if data else {}
+
+
+def _coerce(value: str) -> Any:
+    """Coerce a string env var to its likely Python type."""
+    # Bool
+    if value.lower() in ("true", "yes", "1"):
+        return True
+    if value.lower() in ("false", "no", "0"):
+        return False
+    # Int
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    # Float
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    # String
+    return value
+
+
+class _Config:
+    """Singleton config registry."""
+
+    def __init__(self):
+        self._loaded = False
+        self._merged: dict = {}
+        self._search_paths: list[str] = []
+
+    def register(self, *yaml_files: str) -> None:
+        """Register yaml files to load. Supports 'name_template.yaml' convention.
+
+        If a *_template.yaml is registered, the system first looks for
+        <name>.yaml (without _template). If found, it wins; otherwise the
+        template is used as fallback.
+
+        Args:
+            *yaml_files: Relative paths from project root (e.g. "config.yaml",
+                         "memory/config.yaml", "secrets_template.yaml")
+        """
+        root = _find_project_root()
+        for yaml_file in yaml_files:
+            path = os.path.join(root, yaml_file)
+            self._search_paths.append(path)
+
+    def _resolve_template(self, template_path: str) -> str:
+        """Given a *_template.yaml path, return the preferred file to load.
+
+        If <name>.yaml exists (without _template), use it; otherwise use template.
+        """
+        if not template_path.endswith("_template.yaml"):
+            return template_path
+
+        # Derive the non-template name
+        base, ext = os.path.splitext(template_path)
+        non_template = base + ext  # e.g. secrets_template.yaml -> secrets.yaml
+        if os.path.exists(non_template):
+            return non_template
+        return template_path
+
+    def load(self) -> None:
+        """Load and merge all registered yaml files.
+
+        Each file is loaded in order; later files override earlier ones.
+        Template files use the resolve logic (non-template wins if present).
+        """
+        if self._loaded:
+            return
+
+        merged = {}
+        for path in self._search_paths:
+            resolved = self._resolve_template(path)
+            data = _load_yaml(resolved)
+            merged = _deep_merge(merged, data)
+
+        self._merged = merged
+        self._loaded = True
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a config value by dotted key with full precedence applied.
+
+        Precedence (highest wins):
+            1. Env var (RV_SECTION__KEY, __ for nesting)
+            2. Registered yaml files (merged, later overrides earlier)
+            3. Default passed here
+
+        Args:
+            key: Dot-separated key path (e.g. "memory_api.url", "embedding.model_size")
+            default: Fallback if key not found anywhere
+
+        Returns:
+            The config value, or default if not found
+        """
+        if not self._loaded:
+            self.load()
+
+        # Env var wins everything
+        env_val = _get_via_env(key)
+        if env_val is not None:
+            return env_val
+
+        # Walk the merged config
+        parts = key.split(".")
+        current = self._merged
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return default
+        return current
+
+    def reload(self) -> None:
+        """Force a reload of all config files."""
+        self._loaded = False
+        self._merged = {}
+        self.load()
+
+
+def _get_via_env(key: str) -> Any:
+    """Get a config value via env var matching.
+
+    key "memory_api.url" → check RV_MEMORY_API__URL
+    """
+    # memory_api.url -> RV_MEMORY_API__URL
+    env_key = "RV_" + key.upper().replace(".", "__")
+    if env_key in os.environ:
+        return _coerce(os.environ[env_key])
+    return None
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep merge override into base. Override wins."""
+    result = _deep_copy_dict(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = _deep_copy_dict(val) if isinstance(val, dict) else val
+    return result
+
+
+# --- Singleton instance ---
+
+config = _Config()
+
+# Register default config files in precedence order (later overrides earlier)
+config.register("secrets_template.yaml")  # Lowest precedence for secrets baseline
+config.register("config.yaml")            # Application config wins over template
+
+
+# --- Convenience accessors ---
+
+def get(key: str, default: Any = None) -> Any:
+    """Get a config value. See _Config.get() for full docs."""
+    return config.get(key, default)
+
+
+def reload() -> None:
+    """Reload all config files."""
+    config.reload()

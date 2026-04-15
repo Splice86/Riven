@@ -1,7 +1,7 @@
 # Riven Configuration
 # This file is gitignored - add local overrides to config_local.yaml
 #
-# Cores are loaded from the cores/ folder
+# Shards are loaded from the shards/ folder
 # Each .yaml file in cores/ defines a core
 
 # Default core to use

@@ -38,20 +38,20 @@ class RivenClient:
         self.base_url = base_url or API_URL
         self.session_id: Optional[str] = None
     
-    def list_cores(self) -> List[Dict]:
-        """List available cores."""
-        resp = requests.get(f"{self.base_url}/api/v1/cores")
+    def list_shards(self) -> List[Dict]:
+        """List available shards."""
+        resp = requests.get(f"{self.base_url}/api/v1/shards")
         resp.raise_for_status()
-        return resp.json().get("cores", [])
+        return resp.json().get("shards", [])
     
-    def create_session(self, core_name: str = None) -> Dict:
+    def create_session(self, shard_name: str = None) -> Dict:
         """Create a new session with a client-generated session ID."""
         # Generate session ID on client side
         self.session_id = str(uuid.uuid4())
         
         data = {"session_id": self.session_id}
-        if core_name:
-            data["core_name"] = core_name
+        if shard_name:
+            data["shard_name"] = shard_name
         
         resp = requests.post(f"{self.base_url}/api/v1/sessions", json=data)
         resp.raise_for_status()
@@ -222,7 +222,7 @@ class RivenClient:
                 pass
             self.session_id = None
 
-    def resume_session(self, core_name: str = "code_hammer") -> Optional[Dict]:
+    def resume_session(self, shard_name: str = "code_hammer") -> Optional[Dict]:
         """Try to resume a saved session if it exists on server.
         
         Returns session result if successful, None if not.
@@ -236,7 +236,7 @@ class RivenClient:
             self.session_id = saved_id
             return {
                 "session_id": saved_id,
-                "core_name": core_name,
+                "shard_name": shard_name,
                 "ok": True,
                 "resumed": True
             }
