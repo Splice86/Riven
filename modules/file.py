@@ -1,6 +1,7 @@
 """File module v2 for riven - simplified session-aware file management with memory DB."""
 
 import os
+import sys
 import requests
 from typing import Optional
 from datetime import datetime
@@ -28,6 +29,25 @@ except Exception:
 # Memory API configuration
 MEMORY_API_URL = os.environ.get("MEMORY_API_URL", get_memory_api())
 DEFAULT_DB = os.environ.get("MEMORY_DB", CONFIG.get('memory_api', {}).get('db_name', "riven"))
+
+# Debug flag - enable with: export RV_DEBUG=1
+DEBUG = os.environ.get("RV_DEBUG", "0") == "1"
+
+
+def _debug(tag: str, msg: str) -> None:
+    """Print debug message if RV_DEBUG=1."""
+    if DEBUG:
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[FILE|{ts}|{tag}] {msg}", file=sys.stderr, flush=True)
+
+
+def _debug_write(path: str, content: str, label: str = "") -> None:
+    """Write debug content to a file in ~/.riven/debug/ for deep inspection."""
+    if DEBUG:
+        debug_dir = os.path.expanduser("~/.riven/debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        with open(os.path.join(debug_dir, label), "w") as f:
+            f.write(content)
 
 
 def _count_tokens(text: str) -> int:
@@ -70,17 +90,28 @@ def _search_memories(session_id: str, query: str, limit: int = 50) -> list[dict]
     """Search memory DB and return results."""
     search_query = f"k:{session_id} AND {query}"
     
+    _debug("search", f"session_id={session_id!r} query={query!r} search_query={search_query!r} db={DEFAULT_DB!r}")
+    _debug_write("debug_search_query.txt", search_query, f"search_query_{datetime.now().strftime('%H%M%S')}.txt")
+    
     try:
-        resp = requests.post(
-            f"{MEMORY_API_URL}/memories/search",
-            params={"db_name": DEFAULT_DB},
-            json={"query": search_query, "limit": limit},
-            timeout=5
-        )
+        url = f"{MEMORY_API_URL}/memories/search"
+        resp = requests.post(url, params={"db_name": DEFAULT_DB}, json={"query": search_query, "limit": limit}, timeout=5)
+        _debug("search", f"HTTP {resp.status_code} url={url} params=db_name={DEFAULT_DB}")
+        
         if resp.status_code == 200:
-            return resp.json().get("memories", [])
-    except Exception:
-        pass
+            data = resp.json()
+            memories = data.get("memories", [])
+            _debug("search", f"Found {len(memories)} results")
+            if DEBUG and memories:
+                for m in memories:
+                    _debug("search", f"  memory id={m.get('id')} keywords={m.get('keywords')} props={m.get('properties')}")
+            if DEBUG:
+                _debug_write("debug_search_response.txt", resp.text)
+            return memories
+        else:
+            _debug("search", f"Error: {resp.text[:200]}")
+    except Exception as e:
+        _debug("search", f"Exception: {e}")
     return []
 
 
@@ -139,28 +170,33 @@ def get_module(session_id: str = None):
         line_range = f"{line_start}-{line_end}"  # e.g., "0-50" or "100-*"
         
         # Save file record to memory DB with range-aware keywords
+        keywords = [
+            _get_session_id(),
+            "file",
+            f"file:{filename}",               # For closing all ranges of this file
+            f"file:{filename}:{line_range}"    # For exact range match
+        ]
+        payload = {
+            "content": f"open: {filename} [{line_range}]",
+            "keywords": keywords,
+            "properties": {
+                "path": abs_path,
+                "filename": filename,
+                "line_start": str(line_start),
+                "line_end": str(line_end)
+            }
+        }
+        
         try:
-            requests.post(
-                f"{MEMORY_API_URL}/memories",
-                params={"db_name": DEFAULT_DB},
-                json={
-                    "content": f"open: {filename} [{line_range}]",
-                    "keywords": [
-                        _get_session_id(),
-                        "file",
-                        f"file:{filename}",               # For closing all ranges of this file
-                        f"file:{filename}:{line_range}"    # For exact range match
-                    ],
-                    "properties": {
-                        "path": abs_path,
-                        "filename": filename,
-                        "line_start": str(line_start),
-                        "line_end": str(line_end)
-                    }
-                },
-                timeout=5
-            )
+            url = f"{MEMORY_API_URL}/memories"
+            resp = requests.post(url, params={"db_name": DEFAULT_DB}, json=payload, timeout=5)
+            _debug("open", f"HTTP {resp.status_code} url={url} payload={payload}")
+            if resp.status_code != 200:
+                _debug("open", f"Error: {resp.text[:200]}")
+                return f"Error saving to memory: {resp.text[:200]}"
+            _debug_write("debug_open_response.txt", resp.text)
         except Exception as e:
+            _debug("open", f"Exception: {e}")
             return f"Error saving to memory: {e}"
         
         # Get line count
@@ -240,16 +276,22 @@ def get_module(session_id: str = None):
             Confirmation message
         """
         name = os.path.basename(filename)
+        sid = _get_session_id()
+        _debug("close", f"filename={filename} name={name} session_id={sid} line_start={line_start} line_end={line_end}")
         
         if line_start is not None or line_end is not None:
             # Exact range match - close specific range
             ls = line_start if line_start is not None else 0
             le = line_end if line_end is not None else "*"
             range_key = f"file:{name}:{ls}-{le}"
-            memories = _search_memories(_get_session_id(), f"k:{range_key}", limit=10)
+            query = f"k:{range_key}"
+            memories = _search_memories(sid, query, limit=10)
         else:
             # No range specified - close ALL ranges for this file
-            memories = _search_memories(_get_session_id(), f"k:file:{name}", limit=10)
+            query = f"k:file:{name}"
+            memories = _search_memories(sid, query, limit=10)
+        
+        _debug("close", f"search query={query!r} found {len(memories)} memories to close")
         
         if memories:
             count = 0
@@ -338,20 +380,36 @@ def get_module(session_id: str = None):
 """
         
         # Search memory DB for open files
-        memories = _search_memories(session_id, "k:file", limit=50)
+        _debug("ctx", f"get_context called, session_id={session_id!r}")
+        query = "k:file"
+        full_query = f"k:{session_id} AND {query}"
+        _debug("ctx", f"searching with query={full_query!r} db={DEFAULT_DB!r}")
+        
+        memories = _search_memories(session_id, query, limit=50)
+        
+        _debug("ctx", f"search returned {len(memories)} memories")
         
         if not memories:
+            _debug("ctx", "No memories found - returning 'No files currently open'")
             return instructions + "\n\nNo files currently open"
         
         # Build context from disk
         lines = [instructions, "", "=== Open Files ==="]
         total_tokens = 0
+        included = []
         
         for mem in memories:
             props = mem.get("properties", {})
             path = props.get("path")
             
-            if not path or not os.path.exists(path):
+            _debug("ctx", f"memory id={mem.get('id')} path={path}")
+            
+            if not path:
+                _debug("ctx", f"  -> no path in properties, skipping")
+                continue
+            
+            if not os.path.exists(path):
+                _debug("ctx", f"  -> file does not exist at {path}, skipping")
                 continue
             
             try:
@@ -372,13 +430,22 @@ def get_module(session_id: str = None):
                 lines.append(f"\n=== {filename} [lines {line_start}-{end_display}] ===")
                 lines.append(content)
                 total_tokens += _count_tokens(content)
-            except Exception:
+                included.append(filename)
+                _debug("ctx", f"  -> included {filename} ({len(content)} chars)")
+            except Exception as e:
+                _debug("ctx", f"  -> error reading file: {e}")
                 continue
         
         lines.append(f"\n\n--- File Context Stats ---")
         lines.append(f"Total open file tokens: {total_tokens:,}")
         
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        _debug("ctx", f"returning {len(result)} chars, included files: {included}")
+        
+        if DEBUG:
+            _debug_write("debug_get_context.txt", result)
+        
+        return result
 
     # Create module with all fields at once (avoids __post_init__ validation issues)
     module = Module(
