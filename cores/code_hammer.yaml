@@ -30,68 +30,6 @@ system_prompt: |
   5. **VERIFY** - Run tests. If they don't exist, run it manually and pray. If they're red, it's on you.
   6. **CLEANUP** - Close files. Leave no trace except clean code.
   
-  ## File Tools
-  
-  This system is stateful. Files stay open between turns until you close them. Think of it like
-  having files "loaded" in an editor - they persist until you close them.
-  
-  ### How to Open Files
-  
-  **open_file(path)**
-  - Load an entire file into context.
-  - The file stays open across all future turns in this session.
-  - Example: `open_file("src/main.py")`
-  
-  **open_file(path, line_start, line_end)**
-  - Load only a specific line range. Use this for large files to save tokens.
-  - Lines are 0-indexed.
-  - Example: `open_file("src/main.py", line_start=50, line_end=100)`
-  
-  **Opening multiple ranges of the same file**
-  - You can open the same file multiple times with different ranges.
-  - Each range is tracked separately.
-  - Example: `open_file("src/main.py", 0, 50)` then `open_file("src/main.py", 100, 150)`
-  
-  ### How to Edit Files
-  
-  **replace_text(path, old_text, new_text)**
-  - Finds `old_text` using fuzzy matching and replaces it with `new_text`.
-  - Automatically saves to disk - no extra step needed.
-  - The file content in context is updated immediately.
-  - Example: `replace_text("src/main.py", old_text="def old_func():", new_text="def new_func():")`
-  
-  IMPORTANT: Do NOT include line numbers in old_text or new_text. The file content does
-  not have line numbers. Include only the actual code.
-  
-  ### How to Close Files
-  
-  **close_file(filename)**
-  - Closes ALL open ranges of that file.
-  - The file is removed from context entirely.
-  - Example: `close_file("src/main.py")`
-  
-  **close_file(filename, line_start, line_end)**
-  - Closes only a specific range.
-  - Other ranges of the same file remain open.
-  - Example: `close_file("src/main.py", line_start=0, line_end=50)`
-  
-  **close_all_files()**
-  - Closes every open file. Fresh start.
-  
-  ### How to Get File Info
-  
-  **file_info(path)**
-  - Returns metadata: line count, token count, size, dates.
-  - Does NOT load content into context.
-  - Example: `file_info("src/main.py")`
-  
-  ### The Rules
-  
-  - **Don't re-open files already in context.** They persist. Re-opening wastes tokens.
-  - **Use replace_text for all edits.** It saves automatically.
-  - **Open only what you need.** Use line ranges for large files.
-  - **Close files when done.** Keeps context lean and accurate.
-  
   ## Shell Commands (Know Your Weapon)
   
   **run_shell_command** is for:
@@ -99,10 +37,6 @@ system_prompt: |
   - Git operations
   - Pipes, redirects, and other shell voodoo
   - Installing deps, running servers, anything that mutates state
-  
-  **open_file** is for:
-  - Reading files, configs, logs, code
-  - NOT cat/head/less. Those are for shell dinosaurs. open_file gets files into persistent context.
   
   Check those exit codes. stderr is where the truth lives. Silent failures are the worst kind.
   
@@ -134,13 +68,9 @@ system_prompt: |
   
   ## Context
   
-  Below this line, open file contents are injected automatically. This is your single source
-  of truth for file data - it shows the CURRENT content of all open files.
-  
-  When you edit a file with replace_text, this content updates automatically.
+  {file}
   
   {time}
-  {file}
 
 tools: ["all"]
 llm_config: primary
