@@ -22,13 +22,16 @@ Flow:
 import asyncio
 import inspect
 import json
+import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, AsyncIterator
 
 from openai import AsyncOpenAI
 from modules import registry, Module, CalledFn, ContextFn, _session_id
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -98,7 +101,12 @@ class MemoryClient:
         """
         import requests
         session = session or self.session_id
-        payload = {"role": role, "content": content, "session": session}
+        payload = {
+            "role": role,
+            "content": content,
+            "session": session,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
         if tool_call_id:
             payload["tool_call_id"] = tool_call_id
         if function:
@@ -253,6 +261,7 @@ class Core:
 
         # Debug settings
         self._debug_dir = shard.get('debug_dir')
+        self._debug_snapshots = shard.get('debug_snapshots', False)
         self._debug_call_count = 0
 
         # Register modules from shard config
@@ -292,7 +301,8 @@ class Core:
     def _reorder_messages(self, messages: list[dict]) -> list[dict]:
         """Reorder messages so tool results follow their assistant message.
         
-        Handles cases where memory API returns messages in wrong order.
+        DEFENSIVE-ONLY: With proper storage ordering (assistant before tool result),
+        this should rarely be needed. Kept as safety net for clock skew or edge cases.
         Also parses embedded [tool_calls]...[/tool_calls] in content back to proper field.
         """
         if not messages:
@@ -449,6 +459,32 @@ class Core:
 
         return FunctionResult(call_id=call.id, name=call.name, content=content, error=error)
 
+    def _store_assistant(self, memory, assistant_msg: dict, session_id: str) -> None:
+        """Store assistant message to memory.
+        
+        Handles tool_calls embedding and logging of failures.
+        Storage happens before yielding to ensure correct message ordering.
+        """
+        content = assistant_msg.get("content", "") or ""
+        content = content.strip() if content else ""
+        tool_calls = assistant_msg.get("tool_calls")
+        role = assistant_msg.get("role", "assistant")
+        
+        # Build storage content - embed tool_calls if present
+        if tool_calls:
+            tool_calls_info = json.dumps(_json_safe(tool_calls))
+            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]"
+            if content:
+                storage_content = f"{storage_content}\n\n{content}"
+        else:
+            storage_content = content
+        
+        if storage_content or tool_calls:
+            try:
+                memory.add_context(role, storage_content, session=session_id)
+            except Exception as e:
+                logger.warning(f"Failed to store assistant message to memory: {e}")
+
     async def run_stream(self, session_id: str) -> AsyncIterator[dict]:
         """Run the agent loop.
 
@@ -502,9 +538,10 @@ class Core:
                     yield {"error": "Memory API not available. Ensure memory-api is running."}
                     return
 
-                # Debug: save raw context snapshot
-                stage = "initial" if function_call_count == 0 else f"call_{function_call_count}"
-                self._save_context_snapshot(history, f"raw_{stage}", session_id)
+                # Debug: save raw context snapshot (only if enabled)
+                if self._debug_snapshots:
+                    stage = "initial" if function_call_count == 0 else f"call_{function_call_count}"
+                    self._save_context_snapshot(history, f"raw_{stage}", session_id)
 
                 # Build api_messages from history (filter internal fields)
                 api_messages = [
@@ -609,45 +646,17 @@ class Core:
                 if not calls:
                     assistant_msg["role"] = "assistant"
                     if assistant_msg.get("content", "").strip():
+                        # Store BEFORE yield for consistency with tool-call flow
+                        self._store_assistant(memory, assistant_msg, session_id)
                         safe_msg = _json_safe(assistant_msg)
                         yield {"assistant": safe_msg}
-                        # Store final response to memory
-                        try:
-                            memory.add_context("assistant", assistant_msg["content"], session=session_id)
-                        except Exception:
-                            pass
                     yield {"done": True}
                     return
 
                 # --- Store assistant message BEFORE executing tools ---
                 # This ensures correct ordering: assistant -> tool result (not tool -> assistant)
                 assistant_msg["role"] = "assistant"
-                has_content = assistant_msg.get("content", "") or ""
-                has_content = has_content.strip()
-                has_tool_calls = assistant_msg.get("tool_calls")
-                
-                # Clean up: if content is empty, don't include it
-                if not has_content and "content" in assistant_msg:
-                    del assistant_msg["content"]
-                
-                if has_content or has_tool_calls:
-                    # Store assistant message to memory BEFORE tool execution
-                    # For messages with tool_calls, embed them in content for reconstruction
-                    if has_tool_calls:
-                        tool_calls_info = json.dumps(_json_safe(has_tool_calls))
-                        if has_content:
-                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]\n\n{has_content}"
-                        else:
-                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]"
-                        try:
-                            memory.add_context("assistant", storage_content, session=session_id)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            memory.add_context("assistant", has_content, session=session_id)
-                        except Exception:
-                            pass
+                self._store_assistant(memory, assistant_msg, session_id)
 
                 # --- Execute tool calls ---
                 results: list[FunctionResult] = []
@@ -692,14 +701,19 @@ class Core:
                             tool_call_id=result.call_id,
                             function=result.name
                         )
-                        # Debug: save context after storing tool result
-                        self._save_context_snapshot(
-                            memory.get_context(limit=100, session=session_id),
-                            f"after_tool_result_{function_call_count}",
-                            session_id
-                        )
-                    except Exception:
-                        pass  # Memory store failed, but we'll get it on next fetch
+                    except Exception as e:
+                        logger.warning(f"Failed to store tool result to memory: {e}")
+                    
+                    # Debug: save context after storing tool result (only if enabled)
+                    if self._debug_snapshots:
+                        try:
+                            self._save_context_snapshot(
+                                memory.get_context(limit=100, session=session_id),
+                                f"after_tool_result_{function_call_count}",
+                                session_id
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to save context snapshot: {e}")
 
                 # --- Yield assistant message ---
                 # (Already stored to memory BEFORE tool execution for correct ordering)
