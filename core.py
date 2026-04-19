@@ -619,6 +619,36 @@ class Core:
                     yield {"done": True}
                     return
 
+                # --- Store assistant message BEFORE executing tools ---
+                # This ensures correct ordering: assistant -> tool result (not tool -> assistant)
+                assistant_msg["role"] = "assistant"
+                has_content = assistant_msg.get("content", "") or ""
+                has_content = has_content.strip()
+                has_tool_calls = assistant_msg.get("tool_calls")
+                
+                # Clean up: if content is empty, don't include it
+                if not has_content and "content" in assistant_msg:
+                    del assistant_msg["content"]
+                
+                if has_content or has_tool_calls:
+                    # Store assistant message to memory BEFORE tool execution
+                    # For messages with tool_calls, embed them in content for reconstruction
+                    if has_tool_calls:
+                        tool_calls_info = json.dumps(_json_safe(has_tool_calls))
+                        if has_content:
+                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]\n\n{has_content}"
+                        else:
+                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]"
+                        try:
+                            memory.add_context("assistant", storage_content, session=session_id)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            memory.add_context("assistant", has_content, session=session_id)
+                        except Exception:
+                            pass
+
                 # --- Execute tool calls ---
                 results: list[FunctionResult] = []
                 for call in calls:
@@ -671,38 +701,10 @@ class Core:
                     except Exception:
                         pass  # Memory store failed, but we'll get it on next fetch
 
-                # --- Yield and store assistant message ---
-                assistant_msg["role"] = "assistant"
-                has_content = assistant_msg.get("content", "") or ""
-                has_content = has_content.strip()
-                has_tool_calls = assistant_msg.get("tool_calls")
-                
-                # Clean up: if content is empty, don't include it
-                if not has_content and "content" in assistant_msg:
-                    del assistant_msg["content"]
-                
-                if has_content or has_tool_calls:
-                    # Convert to JSON-safe before yielding (handles pydantic Undefined etc)
-                    safe_assistant_msg = _json_safe(assistant_msg)
-                    yield {"assistant": safe_assistant_msg}
-                    
-                    # Store assistant message to memory
-                    # For messages with tool_calls, embed them in content for reconstruction
-                    if has_tool_calls:
-                        tool_calls_info = json.dumps(_json_safe(has_tool_calls))
-                        if has_content:
-                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]\n\n{has_content}"
-                        else:
-                            storage_content = f"[tool_calls]{tool_calls_info}[/tool_calls]"
-                        try:
-                            memory.add_context("assistant", storage_content, session=session_id)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            memory.add_context("assistant", has_content, session=session_id)
-                        except Exception:
-                            pass
+                # --- Yield assistant message ---
+                # (Already stored to memory BEFORE tool execution for correct ordering)
+                safe_assistant_msg = _json_safe(assistant_msg)
+                yield {"assistant": safe_assistant_msg}
 
                 # Emit that context was rebuilt (for harness to know)
                 yield {"context_updated": {"call_count": function_call_count}}
