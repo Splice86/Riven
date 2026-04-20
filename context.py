@@ -9,11 +9,8 @@ It knows nothing about LLM calls, tool execution, or the agent loop.
 """
 
 import json
-import os
 import re
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Callable
 
 import requests
 from config import get
@@ -126,37 +123,24 @@ class MemoryClient:
 
 class ContextManager:
     """Handles all context/memory operations for the agent loop.
-    
+
     Encapsulates:
     - Fetching history from Memory API
     - Building system prompt from context functions
     - Message processing (reorder, truncate, sanitize for LLM)
     - Storing messages to Memory API
     """
-    
+
     def __init__(
         self,
         memory_url: str = None,
         tool_result_max_lines: int = 200,
         tool_result_char_per_line: int = 150,
-        debug_dir: str = None,
-        debug_snapshots: bool = False,
     ):
         self._memory_url = memory_url or get('memory_api.url')
         self._tool_max_lines = tool_result_max_lines
         self._tool_char_per_line = tool_result_char_per_line
-        self._debug_snapshots = debug_snapshots
-        self._debug_call_count = 0
-        
-        # Resolve relative debug_dir paths relative to project root (not cwd)
-        if debug_dir:
-            path = Path(debug_dir)
-            if not path.is_absolute():
-                path = Path(__file__).parent / path
-            self._debug_dir = path
-        else:
-            self._debug_dir = None
-    
+
     @property
     def memory_client(self) -> MemoryClient:
         """Get or create a MemoryClient for this context manager."""
@@ -304,7 +288,7 @@ class ContextManager:
     
     def sanitize_messages_for_llm(self, api_messages: list[dict]) -> list[dict]:
         """Sanitize messages for LLM API compatibility.
-        
+
         Ensures tool result messages have the correct structure:
         - role: "tool" (NOT "function" - function role is for calling, not results)
         - tool_call_id: links result to the original tool call request
@@ -312,7 +296,7 @@ class ContextManager:
         - (optional) name: extracted from stored 'function' property if present
         """
         api_messages = _json_safe(api_messages)
-        
+
         for msg in api_messages:
             if msg.get('role') == 'tool':
                 # Keep role as "tool" — standard OpenAI format for tool results
@@ -322,62 +306,3 @@ class ContextManager:
                     del msg['function']
 
         return api_messages
-    
-    # -------------------------------------------------------------------------
-    # Debug helpers
-    # -------------------------------------------------------------------------
-    
-    def debug_save(
-        self,
-        stage: str,
-        system_prompt: str,
-        api_messages: list[dict],
-        context_data: dict = None,
-    ) -> None:
-        """Save debug dump of context before LLM call."""
-        if not self._debug_dir:
-            return
-        
-        self._debug_call_count += 1
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"call_{self._debug_call_count:03d}_{stage}_{timestamp}.json"
-        
-        os.makedirs(self._debug_dir, exist_ok=True)
-        filepath = os.path.join(self._debug_dir, filename)
-        
-        debug_data = {
-            "timestamp": timestamp,
-            "stage": stage,
-            "call_number": self._debug_call_count,
-            "context_data": context_data or {},
-            "system_prompt": system_prompt,
-            "messages": api_messages,
-        }
-        
-        with open(filepath, 'w') as f:
-            json.dump(debug_data, f, indent=2, default=str)
-    
-    def save_context_snapshot(
-        self,
-        raw_context: list[dict],
-        label: str,
-        session_id: str = None,
-    ) -> None:
-        """Save raw context snapshot to a file for debugging."""
-        debug_dir = self._debug_dir or 'context_debug'
-        os.makedirs(debug_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"{label}_{timestamp}.json"
-        filepath = os.path.join(debug_dir, filename)
-        
-        snapshot = {
-            "timestamp": timestamp,
-            "label": label,
-            "session_id": session_id,
-            "message_count": len(raw_context),
-            "messages": raw_context,
-        }
-        
-        with open(filepath, 'w') as f:
-            json.dump(snapshot, f, indent=2, default=str)

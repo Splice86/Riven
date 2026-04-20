@@ -23,9 +23,7 @@ import asyncio
 import inspect
 import json
 import logging
-import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Callable, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -166,17 +164,11 @@ class Core:
         tool_result_max_lines = shard.get('tool_result_max_lines', 200)
         tool_result_char_per_line = shard.get('tool_result_char_per_line', 150)
 
-        # Debug settings (shard overrides config defaults)
-        debug_dir = shard.get('debug_dir') or get('debug_dir')
-        debug_snapshots = shard.get('debug_snapshots', get('debug_snapshots', False))
-
         # Context manager handles all memory API + message processing
         self._ctx = ContextManager(
             memory_url=memory_url,
             tool_result_max_lines=tool_result_max_lines,
             tool_result_char_per_line=tool_result_char_per_line,
-            debug_dir=debug_dir,
-            debug_snapshots=debug_snapshots,
         )
 
         # Register modules from shard config
@@ -326,8 +318,6 @@ class Core:
             except requests.exceptions.ConnectionError as e:
                 context_error = str(e)
                 history = []
-                if self._ctx._debug_snapshots:
-                    self._ctx.save_context_snapshot([], "ERROR_memory_api", session_id)
                 error_msg = f"Memory API connection failed: {context_error}. Ensure memory-api is running at {memory_url or 'http://localhost:8030'}."
                 try:
                     memory.add_context("error", error_msg, session=session_id)
@@ -338,8 +328,6 @@ class Core:
             except Exception as e:
                 context_error = str(e)
                 history = []
-                if self._ctx._debug_snapshots:
-                    self._ctx.save_context_snapshot([], "ERROR_memory_api", session_id)
                 error_msg = f"Memory API error: {context_error}"
                 try:
                     memory.add_context("error", error_msg, session=session_id)
@@ -348,35 +336,13 @@ class Core:
                 yield {"error": error_msg}
                 return
 
-            # Debug: save raw context snapshot BEFORE building messages
-            if self._ctx._debug_snapshots:
-                self._ctx.save_context_snapshot(history, "raw_loop", session_id)
-
             # Build messages for LLM (system prompt + processed history)
             api_messages, system = self._ctx.prepare_messages_for_llm(
                 history, self._system_template, registry
             )
 
-            # Debug: save context before LLM call
-            context_data = self._ctx.build_context_from_modules(registry)
-            self._ctx.debug_save(stage="loop", system_prompt=system,
-                                 api_messages=api_messages, context_data=context_data)
-
             # Sanitize messages for LLM API
             api_messages = self._ctx.sanitize_messages_for_llm(api_messages)
-            
-            # --- DEBUG: Log what goes to LLM ---
-            debug_dir = os.environ.get('DEBUG_CONTEXT_DIR', os.path.join(os.path.dirname(__file__), 'context_logs'))
-            os.makedirs(debug_dir, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            filename = f"to_llm_{ts}.json"
-            filepath = os.path.join(debug_dir, filename)
-            with open(filepath, 'w') as f:
-                json.dump({
-                    "timestamp": ts,
-                    "session": session_id,
-                    "messages": api_messages,
-                }, f, indent=2, default=str)
             
             # --- Call LLM ---
             try:
@@ -445,14 +411,6 @@ class Core:
                 assistant_msg["role"] = "assistant"
                 if assistant_msg.get("content", "").strip():
                     self._store_assistant(memory, assistant_msg, session_id)
-                    if self._ctx._debug_snapshots:
-                        try:
-                            self._ctx.save_context_snapshot(
-                                memory.get_context(limit=100, session=session_id),
-                                "final_response", session_id
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to save context snapshot: {e}")
                     safe_msg = _json_safe(assistant_msg)
                     yield {"assistant": safe_msg}
                 yield {"done": True}
@@ -511,17 +469,6 @@ class Core:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store tool result to memory: {e}")
-                    if self._ctx._debug_snapshots:
-                        self._ctx.save_context_snapshot([], "ERROR_store_tool", session_id)
-
-                if self._ctx._debug_snapshots:
-                    try:
-                        self._ctx.save_context_snapshot(
-                            memory.get_context(limit=100, session=session_id),
-                            "after_tool_result", session_id
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to save context snapshot: {e}")
 
             # --- Yield assistant message ---
             safe_assistant_msg = _json_safe(assistant_msg)
