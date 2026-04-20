@@ -289,13 +289,11 @@ class ContextManager:
         # Truncate tool result content to prevent context overflow
         for msg in api_messages:
             if msg.get('role') == 'tool' and msg.get('content'):
-                original_len = len(msg['content'])
                 msg['content'] = self.truncate_tool_result(
                     msg['content'],
                     self._tool_max_lines,
                     self._tool_char_per_line
                 )
-                # Truncation happened silently
         
         # Add system prompt at the front
         system = self.build_system_prompt(system_template, registry)
@@ -322,14 +320,7 @@ class ContextManager:
                 if msg.get('function'):
                     msg['name'] = msg['function']
                     del msg['function']
-                # Legacy: if content is "func_name: result" format, extract it
-                # (new storage uses 'function' property instead)
-                content = msg.get('content', '')
-                if msg.get('name') is None and ':' in content:
-                    func_name, _, rest = content.partition(':')
-                    msg['name'] = func_name.strip()
-                    msg['content'] = rest.strip()
-        
+
         return api_messages
     
     # -------------------------------------------------------------------------

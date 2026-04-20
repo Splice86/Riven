@@ -397,7 +397,6 @@ class Core:
 
             # --- Collect the complete assistant message ---
             assistant_msg = {"tool_calls": []}
-            full_response = ""
 
             async for chunk in stream:
                 if self._cancelled:
@@ -416,14 +415,12 @@ class Core:
                     thinking = _json_safe(delta.model_extra.get('reasoning_content')) or _json_safe(delta.model_extra.get('reasoning'))
                     if thinking:
                         yield {"thinking": thinking}
-                        full_response += f"[think]{thinking}[/think]"
 
                 if delta.content:
                     yield {"token": delta.content}
                     if "content" not in assistant_msg:
                         assistant_msg["content"] = ""
                     assistant_msg["content"] += delta.content
-                    full_response += delta.content
 
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:

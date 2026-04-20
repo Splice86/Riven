@@ -3,11 +3,11 @@
 ## Goals (Priority Order)
 
 ### GOAL 1: Extract shared memory utilities 🔴
-- [ ] Create `modules/memory_utils.py` with `_search_memories` and `_delete_memory`
-- [ ] Update `modules/file.py` to import from `memory_utils`
-- [ ] Update `modules/planning.py` to import from `memory_utils`
-- [ ] Add unit tests for memory utilities
-- [ ] Commit
+- [x] Create `modules/memory_utils.py` with `_search_memories` and `_delete_memory`
+- [x] Update `modules/file.py` to import from `memory_utils`
+- [x] planning.py has _search_planning (adds k:planning) - intentionally separate
+- [x] Add unit tests for memory utilities
+- [x] Commit [ff8b732]
 
 ### GOAL 2: Remove dead code 🟠
 - [ ] Remove `full_response` accumulation in `core.py` `run_stream()`
