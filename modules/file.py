@@ -119,6 +119,7 @@ def _file_help() -> str:
 7. **file_info(path)** - Get file metadata
 8. **search_files(pattern, path?)** - Grep pattern across files
 9. **list_dir(path?)** - List directory contents
+10. **write_text(path, content)** - Write content to a file (creates if needed)
 
 ### Guidelines
 - Prefer opening whole files (no line_start/line_end) - small files are fine to read entirely
@@ -128,7 +129,8 @@ def _file_help() -> str:
 - Use diff_text() to preview a full change before applying it
 - Close files when done to keep context clean
 - Use file_info() for metadata without loading content
-- Be sensitive to context growth - open only what you need"""
+- Be sensitive to context growth - open only what you need
+- Use write_text() to create new files or overwrite existing ones entirely"""
 
 
 def _file_context() -> str:
@@ -546,6 +548,35 @@ async def search_files(pattern: str, path: str = None) -> str:
     return "\n".join(formatted)
 
 
+async def write_text(path: str, content: str) -> str:
+    """Write content to a file, creating it if needed.
+    
+    Args:
+        path: Path to the file to write
+        content: Content to write to the file
+        
+    Returns:
+        Confirmation message with file info
+    """
+    path = os.path.expanduser(path)
+    abs_path = os.path.abspath(path)
+    
+    try:
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, 'w') as f:
+            f.write(content)
+    except Exception as e:
+        return f"Error writing {abs_path}: {e}"
+    
+    try:
+        stat = os.stat(abs_path)
+        line_count = len(content.splitlines())
+        token_count = _count_tokens(content)
+        return f"Wrote {os.path.basename(abs_path)} ({line_count} lines, ~{token_count:,} tokens)"
+    except Exception:
+        return f"Wrote {abs_path}"
+
+
 async def list_dir(path: str = None) -> str:
     """List directory contents (files and subdirectories).
     
@@ -780,6 +811,25 @@ def get_module():
                     "required": []
                 },
                 fn=list_dir,
+            ),
+            CalledFn(
+                name="write_text",
+                description="Write content to a file, creating it if needed.\n\nArgs:\n- path: Path to the file to write\n- content: Content to write",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to write"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write to the file"
+                        }
+                    },
+                    "required": ["path", "content"]
+                },
+                fn=write_text,
             ),
         ],
         context_fns=[
