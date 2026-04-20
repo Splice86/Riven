@@ -109,10 +109,13 @@ def _file_help() -> str:
 4. **close_all_files()** - Close all open files
 5. **file_info(path)** - Get file metadata
 
-### Notes
-- Open files are automatically included in your context below
-- Use replace_text() for edits - it saves automatically
-- Close files when done to keep context clean"""
+### Guidelines
+- Prefer opening whole files (no line_start/line_end) - small files are fine to read entirely
+- Avoid opening the same file multiple times in different ranges - open once with a wider range or not at all
+- Close files when done to keep context clean
+- Use file_info() for metadata without loading content
+- If you need to work with multiple files, close each one before opening the next
+- Be sensitive to context growth - open only what you need"""
     
 def _file_context() -> str:
     """Dynamic context - currently open files. Changes when files are opened/closed."""
@@ -380,7 +383,7 @@ def get_module():
         called_fns=[
             CalledFn(
                 name="open_file",
-                description="Open a file and add it to the file context. Use this before reading or editing a file.",
+                description="Open a file and add it to the file context. Use this before reading or editing a file.\n\nGuidelines:\n- Prefer opening whole files (no line_start/line_end) when possible - small files are fine to read entirely\n- Avoid opening the same file multiple times in different ranges - open once with a wider range or not at all\n- Close files (close_file) when you're done with them to keep context clean\n- Use file_info() for metadata without loading content\n- If you need to work with multiple files, close each one before opening the next\n- Be sensitive to context growth - open only what you need",
                 parameters={
                     "type": "object",
                     "properties": {
