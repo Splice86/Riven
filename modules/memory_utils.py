@@ -15,18 +15,26 @@ from config import get
 MEMORY_API_URL = get('memory_api.url')
 
 
-def _search_memories(session_id: str, query: str, limit: int = 50) -> list[dict]:
+def _search_memories(
+    session_id: str,
+    query: str,
+    limit: int = 50,
+    keyword_prefix: str = "",
+) -> list[dict]:
     """Search memory DB and return results.
 
     Args:
         session_id: Current session ID (auto-scoped with k:<session_id>)
-        query: Search query (will be combined with session scope)
+        query: Search query (combined with session scope and keyword_prefix)
         limit: Maximum number of results to return
+        keyword_prefix: Optional extra keywords to insert after session scope,
+                        e.g. "k:planning AND " to scope results to the planning namespace
 
     Returns:
         List of memory dicts from the API
     """
-    search_query = f"k:{session_id} AND {query}"
+    prefix = f"{keyword_prefix}" if keyword_prefix else ""
+    search_query = f"k:{session_id}{prefix} AND {query}"
 
     try:
         url = f"{MEMORY_API_URL}/memories/search"

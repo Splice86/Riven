@@ -12,28 +12,13 @@ import os
 import requests
 
 from modules import CalledFn, ContextFn, Module, get_session_id
-from config import get
-
-
-MEMORY_API_URL = get('memory_api.url')
+from modules.memory_utils import _search_memories, MEMORY_API_URL
 
 
 def _search_planning(query: str, limit: int = 50) -> list[dict]:
     """Search memory DB for planning records."""
     session_id = get_session_id()
-    full_query = f"k:{session_id} AND k:planning AND {query}"
-    
-    try:
-        resp = requests.post(
-            f"{MEMORY_API_URL}/memories/search",
-            json={"query": full_query, "limit": limit},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            return resp.json().get("memories", [])
-    except Exception:
-        pass
-    return []
+    return _search_memories(session_id, query, limit=limit, keyword_prefix="k:planning AND ")
 
 
 def _search_goals(status: str = None, limit: int = 20) -> list[dict]:
