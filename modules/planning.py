@@ -8,6 +8,7 @@ Session ID automatically available via get_session_id().
 """
 
 import json
+import os
 import requests
 
 from modules import CalledFn, ContextFn, Module, get_session_id
@@ -122,7 +123,6 @@ async def add_file_to_goal(goal_id: int, file_path: str) -> str:
     files = _get_goal_files(goal)
     
     # Normalize and deduplicate
-    import os
     abs_path = os.path.abspath(os.path.expanduser(file_path))
     
     if abs_path in files:
@@ -161,7 +161,6 @@ async def remove_file_from_goal(goal_id: int, file_path: str) -> str:
     props = goal.get("properties", {})
     files = _get_goal_files(goal)
     
-    import os
     abs_path = os.path.abspath(os.path.expanduser(file_path))
     
     if abs_path not in files:
@@ -254,7 +253,6 @@ async def get_goal(goal_id: int) -> str:
     if files:
         lines.append(f"\nFiles ({len(files)}):")
         for f in files:
-            import os
             lines.append(f"  - {f}")
     else:
         lines.append("\nNo files linked")
@@ -319,7 +317,6 @@ def _planning_context() -> str:
         if files:
             lines.append(f"\n{priority_emoji} #{goal['id']} {title}")
             for f in files:
-                import os
                 lines.append(f"   - {os.path.basename(f)}")
         else:
             lines.append(f"\n{priority_emoji} #{goal['id']} {title} (no files)")
