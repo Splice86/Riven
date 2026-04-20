@@ -120,29 +120,20 @@ async def send_message(req: MessageRequest):
     """
     import requests
 
-    print(f"\n{'='*60}")
-    print(f"[API] Received message: session={req.session_id}, shard={req.shard_name}, stream={req.stream}")
-    print(f"[API] Message preview: {req.message[:100]}...")
-    print(f"{'='*60}")
-
     shard = _load_shard(req.shard_name)
     llm = get_llm_config("primary")
 
     core = Core(shard=shard, llm=llm)
-    print(f"[API] Core created: LLM={core._llm_url}, Memory={core._ctx._memory_url}")
 
     # Store user message to Memory API first
     memory_url = get("memory_api.url", "http://127.0.0.1:8030")
-    print(f"[API] Storing user message to memory at {memory_url}")
 
     try:
         r = requests.post(
             f"{memory_url}/context",
             json={"role": "user", "content": req.message, "session": req.session_id},
         )
-        print(f"[API] User message stored: status={r.status_code}")
     except requests.RequestException as e:
-        print(f"[API] ERROR storing user message: {e}")
         raise HTTPException(500, f"Memory API error: {e}")
 
     if req.stream:
@@ -152,16 +143,12 @@ async def send_message(req: MessageRequest):
                 turn_count = 0
                 while True:
                     turn_count += 1
-                    print(f"[API] Starting turn {turn_count}")
                     
                     # Use a generator variable to ensure proper cleanup
                     generator = core.run_stream(req.session_id)
                     async for event in generator:
-                        print(f"[API] Stream event: {list(event.keys())}")
-                        
                         # Handle errors
                         if "error" in event:
-                            print(f"[API] YIELD error: {event['error']}")
                             yield f"data: {json.dumps({'error': event['error']})}\n\n"
                             # Ensure generator is cleaned up
                             await generator.aclose()
@@ -169,42 +156,35 @@ async def send_message(req: MessageRequest):
 
                         # Handle tool_call events - forward as-is
                         if "tool_call" in event:
-                            print(f"[API] YIELD tool_call: {event['tool_call']}")
                             yield f"data: {json.dumps(event)}\n\n"
 
                         # Handle thinking events
                         elif "thinking" in event:
                             content = event["thinking"]
                             if content and content.strip():
-                                print(f"[API] YIELD thinking: {content[:50]}...")
                                 yield f"data: {json.dumps({'thinking': content})}\n\n"
 
                         # Handle tool results - forward as-is
                         elif "tool_result" in event:
-                            print(f"[API] YIELD tool_result: {event['tool_result']}")
                             yield f"data: {json.dumps(event)}\n\n"
 
                         # Regular token
                         elif "token" in event:
-                            print(f"[API] YIELD token: {event['token'][:50]}...")
                             yield f"data: {json.dumps({'token': event['token']})}\n\n"
 
                         # Context rebuilt - properly cleanup and loop for next turn
                         if event.get("context_rebuilt"):
-                            print(f"[API] context_rebuilt - ending turn {turn_count}, starting next turn")
                             # Ensure generator cleanup before next turn
                             await generator.aclose()
                             break
 
                         # Done
                         if event.get("done"):
-                            print("[API] YIELD done")
                             yield f"data: {json.dumps({'done': True})}\n\n"
                             await generator.aclose()
                             return
 
             except Exception as e:
-                print(f"[API] Exception in generate: {e}")
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")

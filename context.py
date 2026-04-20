@@ -293,7 +293,7 @@ class ContextManager:
                     self._tool_char_per_line
                 )
                 if len(msg['content']) < original_len:
-                    print(f"[TRUNCATE] tool result: {original_len} -> {len(msg['content'])} chars")
+                    pass  # Truncation happened silently
         
         # Add system prompt at the front
         system = self.build_system_prompt(system_template, registry)
@@ -388,5 +388,3 @@ class ContextManager:
         
         with open(filepath, 'w') as f:
             json.dump(snapshot, f, indent=2, default=str)
-        
-        print(f"[CONTEXT SNAPSHOT] Saved {len(raw_context)} messages to {filepath}")

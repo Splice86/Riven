@@ -191,7 +191,7 @@ class Core:
                     module = mod.get_module()
                     registry.register(module)
             except Exception as e:
-                print(f"Warning: Failed to load module {name}: {e}")
+                logger.warning(f"Failed to load module {name}: {e}")
 
     def _get_functions(self) -> list[Function]:
         """Convert registry called_fns to Core Functions."""
@@ -268,19 +268,10 @@ class Core:
             storage_content = content
         
         if storage_content or tool_calls:
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-            print(f"\n[STORE_ASSISTANT {ts}] role={role}")
-            if tool_calls:
-                for tc in tool_calls:
-                    print(f"  tool_call: id={tc.get('id')} name={tc.get('function',{}).get('name')}")
-            if storage_content:
-                print(f"  content={storage_content[:80]}{'...' if len(storage_content) > 80 else ''}")
             try:
                 memory.add_context(role, storage_content, session=session_id)
-                print(f"[STORE_ASSISTANT] SUCCESS")
             except Exception as e:
                 logger.warning(f"Failed to store assistant message to memory: {e}")
-                print(f"[STORE_ASSISTANT] FAILED: {e}")
 
     async def run_stream(self, session_id: str) -> AsyncIterator[dict]:
         """Run the agent loop for ONE turn.
@@ -304,12 +295,6 @@ class Core:
             {"error": str}            - error
         """
         import requests
-        
-        print(f"\n{'='*60}")
-        print(f"[CORE] run_stream START: session={session_id}")
-        print(f"[CORE] LLM URL: {self._llm_url}")
-        print(f"[CORE] Memory URL: {self._ctx._memory_url}")
-        print(f"{'='*60}")
         
         self._cancelled = False
 
@@ -393,7 +378,6 @@ class Core:
                 }, f, indent=2, default=str)
             
             # --- Call LLM ---
-            print(f"[CORE] Calling LLM: model={self._llm_model}, message_count={len(api_messages)}")
             try:
                 stream = await self._client.chat.completions.create(
                     model=self._llm_model,
@@ -401,9 +385,7 @@ class Core:
                     tools=tools or None,
                     stream=True,
                 )
-                print(f"[CORE] LLM call started successfully")
             except Exception as e:
-                print(f"[CORE] LLM call FAILED: {type(e).__name__}: {e}")
                 error_msg = f"LLM call failed: {type(e).__name__}: {e}. Session={session_id}"
                 try:
                     memory.add_context("error", error_msg, session=session_id)
@@ -423,7 +405,6 @@ class Core:
                         memory.add_context("error", error_msg, session=session_id)
                     except Exception:
                         pass
-                    print(f"[CORE] YIELD error (cancelled): {error_msg}")
                     yield {"error": error_msg}
                     return
 
@@ -463,7 +444,6 @@ class Core:
 
             # --- No tool calls — done ---
             if not calls:
-                print(f"[CORE] No tool calls - completing")
                 assistant_msg["role"] = "assistant"
                 if assistant_msg.get("content", "").strip():
                     self._store_assistant(memory, assistant_msg, session_id)
@@ -477,7 +457,6 @@ class Core:
                             logger.warning(f"Failed to save context snapshot: {e}")
                     safe_msg = _json_safe(assistant_msg)
                     yield {"assistant": safe_msg}
-                print(f"[CORE] YIELD done")
                 yield {"done": True}
                 return
 
@@ -503,11 +482,9 @@ class Core:
                         memory.add_context("error", error_msg, session=session_id)
                     except Exception:
                         pass
-                    print(f"[CORE] YIELD error (max calls): {error_msg}")
                     yield {"error": error_msg}
                     return
 
-                print(f"[CORE] YIELD tool_call: id={call.id} name={call.name}")
                 yield {"tool_call": {
                     "id": call.id, 
                     "name": call.name, 
@@ -518,7 +495,6 @@ class Core:
                 results.append(result)
 
                 result_content = result.content if not result.error else f"ERROR: {result.error}"
-                print(f"[CORE] YIELD tool_result: id={result.call_id} name={result.name} error={result.error}")
                 yield {"tool_result": {
                     "id": result.call_id, 
                     "name": result.name,
@@ -527,9 +503,6 @@ class Core:
                 }}
 
                 # Store tool result to memory API
-                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                print(f"\n[STORE_TOOL_RESULT {ts}] call_id={result.call_id} name={result.name}")
-                print(f"  content={result_content[:100]}{'...' if len(result_content) > 100 else ''}")
                 try:
                     memory.add_context(
                         "tool",
@@ -538,10 +511,8 @@ class Core:
                         tool_call_id=result.call_id,
                         function=result.name
                     )
-                    print(f"[STORE_TOOL_RESULT] SUCCESS")
                 except Exception as e:
                     logger.warning(f"Failed to store tool result to memory: {e}")
-                    print(f"[STORE_TOOL_RESULT] FAILED: {e}")
                     if self._ctx._debug_snapshots:
                         self._ctx.save_context_snapshot([], "ERROR_store_tool", session_id)
 
