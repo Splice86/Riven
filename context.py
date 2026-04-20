@@ -11,6 +11,7 @@ It knows nothing about LLM calls, tool execution, or the agent loop.
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 import requests
@@ -151,9 +152,17 @@ class ContextManager:
         self._memory_url = memory_url or get('memory_api.url')
         self._tool_max_lines = tool_result_max_lines
         self._tool_char_per_line = tool_result_char_per_line
-        self._debug_dir = debug_dir
         self._debug_snapshots = debug_snapshots
         self._debug_call_count = 0
+        
+        # Resolve relative debug_dir paths relative to project root (not cwd)
+        if debug_dir:
+            path = Path(debug_dir)
+            if not path.is_absolute():
+                path = Path(__file__).parent / path
+            self._debug_dir = path
+        else:
+            self._debug_dir = None
     
     @property
     def memory_client(self) -> MemoryClient:

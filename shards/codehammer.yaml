@@ -77,4 +77,3 @@ max_function_calls: 20
 
 # Debug - context snapshots to trace context flow
 debug_snapshots: true
-debug_dir: "/home/david/Projects/riven_projects/riven_core/context_debug"

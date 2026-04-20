@@ -30,6 +30,7 @@ from typing import Callable, AsyncIterator
 
 from openai import AsyncOpenAI
 from context import MemoryClient, ContextManager, _json_safe
+from config import get
 from modules import registry, Module, CalledFn, ContextFn, _session_id
 
 logger = logging.getLogger(__name__)
@@ -165,9 +166,9 @@ class Core:
         tool_result_max_lines = shard.get('tool_result_max_lines', 200)
         tool_result_char_per_line = shard.get('tool_result_char_per_line', 150)
 
-        # Debug settings
-        debug_dir = shard.get('debug_dir')
-        debug_snapshots = shard.get('debug_snapshots', False)
+        # Debug settings (shard overrides config defaults)
+        debug_dir = shard.get('debug_dir') or get('debug_dir')
+        debug_snapshots = shard.get('debug_snapshots', get('debug_snapshots', False))
 
         # Context manager handles all memory API + message processing
         self._ctx = ContextManager(
@@ -327,7 +328,7 @@ class Core:
                 history = []
                 if self._ctx._debug_snapshots:
                     self._ctx.save_context_snapshot([], "ERROR_memory_api", session_id)
-                error_msg = f"Memory API connection failed: {context_error}. Ensure memory-api is running on port 8030."
+                error_msg = f"Memory API connection failed: {context_error}. Ensure memory-api is running at {memory_url or 'http://localhost:8030'}."
                 try:
                     memory.add_context("error", error_msg, session=session_id)
                 except Exception:
@@ -365,7 +366,7 @@ class Core:
             api_messages = self._ctx.sanitize_messages_for_llm(api_messages)
             
             # --- DEBUG: Log what goes to LLM ---
-            debug_dir = os.environ.get('DEBUG_CONTEXT_DIR', '/home/david/Projects/riven_projects/riven_core/context_logs')
+            debug_dir = os.environ.get('DEBUG_CONTEXT_DIR', os.path.join(os.path.dirname(__file__), 'context_logs'))
             os.makedirs(debug_dir, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             filename = f"to_llm_{ts}.json"

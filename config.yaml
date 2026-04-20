@@ -38,3 +38,7 @@ modules:
   - shell
   - memory
   - web
+
+# Debug settings
+debug_dir: "context_logs"
+debug_snapshots: false
