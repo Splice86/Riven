@@ -149,14 +149,22 @@ async def send_message(req: MessageRequest):
         async def generate():
             try:
                 # Harness controls the loop - calls run_stream() for each LLM turn
+                turn_count = 0
                 while True:
-                    async for event in core.run_stream(req.session_id):
+                    turn_count += 1
+                    print(f"[API] Starting turn {turn_count}")
+                    
+                    # Use a generator variable to ensure proper cleanup
+                    generator = core.run_stream(req.session_id)
+                    async for event in generator:
                         print(f"[API] Stream event: {list(event.keys())}")
                         
                         # Handle errors
                         if "error" in event:
                             print(f"[API] YIELD error: {event['error']}")
                             yield f"data: {json.dumps({'error': event['error']})}\n\n"
+                            # Ensure generator is cleaned up
+                            await generator.aclose()
                             break
 
                         # Handle tool_call events - forward as-is
@@ -181,15 +189,18 @@ async def send_message(req: MessageRequest):
                             print(f"[API] YIELD token: {event['token'][:50]}...")
                             yield f"data: {json.dumps({'token': event['token']})}\n\n"
 
-                        # Context rebuilt - loop back for next LLM turn
+                        # Context rebuilt - properly cleanup and loop for next turn
                         if event.get("context_rebuilt"):
-                            print("[API] context_rebuilt - looping for next turn")
+                            print(f"[API] context_rebuilt - ending turn {turn_count}, starting next turn")
+                            # Ensure generator cleanup before next turn
+                            await generator.aclose()
                             break
 
                         # Done
                         if event.get("done"):
                             print("[API] YIELD done")
                             yield f"data: {json.dumps({'done': True})}\n\n"
+                            await generator.aclose()
                             return
 
             except Exception as e:
