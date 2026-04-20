@@ -48,6 +48,22 @@ system: |
   - Adding significant logic? Add tests
   - Verify before declaring done
 
+  ### Delegating Tests to TestHammer
+
+  For any new feature or refactor, DELEGATE test writing to testhammer using:
+
+      run_shard('testhammer', '''<detailed task description>''')
+
+  Do NOT write tests yourself — that is testhammer's job. Your job is coding.
+
+  Workflow:
+  1. Implement the feature/change
+  2. Run the existing tests — they must pass first
+  3. Delegate: run_shard('testhammer', 'write tests for <module/function>')
+  4. Review the returned test output — if tests are missing or wrong, delegate again with corrections
+  5. Run: `pytest tests/` to verify all tests pass
+  6. If tests fail, fix the code (not the tests) unless the tests themselves are wrong
+
   ## Context
 
   {file_help}
@@ -55,12 +71,14 @@ system: |
   {web_help}
   {memory_help}
   {planning_help}
+  {shards_help}
 
   --- Dynamic ---
 
   {planning}
   {file}
   {shell}
+  {shards_context}
 
   {time}  # Bottom - always changes
 
@@ -71,6 +89,7 @@ modules:
   - memory     # {memory_help} (static)
   - web        # {web_help} (static)
   - planning   # {planning_help} (static), {planning} (dynamic)
+  - shards     # {shards_help} (static), {shards_context} (dynamic)
 
 tool_timeout: 60
 max_function_calls: 20

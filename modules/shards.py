@@ -149,13 +149,20 @@ async def run_shard(
 
         token = _session_id.set(sub_session)
         try:
-            async for event in core.run_stream(sub_session):
-                if "token" in event:
-                    output_parts.append(event["token"])
-                elif "error" in event:
-                    output_parts.append(f"[ERROR: {event['error']}]")
-                elif "done" in event:
-                    break
+            # Loop to handle multi-turn interactions (file writing, test running, etc.)
+            done = False
+            while not done:
+                async for event in core.run_stream(sub_session):
+                    if "token" in event:
+                        output_parts.append(event["token"])
+                    elif "error" in event:
+                        output_parts.append(f"[ERROR: {event['error']}]")
+                    elif "done" in event:
+                        done = True
+                        break
+                    elif "context_rebuilt" in event:
+                        # Continue loop for next LLM call
+                        break
         finally:
             _session_id.reset(token)
 

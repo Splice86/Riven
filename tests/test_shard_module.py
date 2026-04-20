@@ -86,11 +86,11 @@ class TestShardConfigLoading:
         assert "codehammer" in names
         assert "testhammer" in names
 
-    def test_codehammer_does_not_have_shards_module(self):
-        """codehammer should NOT include 'shards' in its modules (prevents recursion)."""
+    def test_codehammer_has_shards_module(self):
+        """codehammer SHOULD include 'shards' so it can delegate to testhammer."""
         from modules.shards import _load_shard_config
         shard = _load_shard_config("codehammer")
-        assert "shards" not in shard.get("modules", [])
+        assert "shards" in shard.get("modules", [])
 
 
 class TestListShards:
