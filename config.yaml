@@ -29,7 +29,7 @@ max_function_calls: 20
 system: "You are a helpful assistant."
 
 # Default shard to use
-default_shard: code_hammer
+default_shard: codehammer
 
 # Modules available globally
 modules:

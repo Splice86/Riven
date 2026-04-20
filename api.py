@@ -4,16 +4,32 @@ Session ID is passed directly to Memory API - no session state stored here.
 The API is stateless; all conversation history lives in the Memory API.
 """
 
+import glob
 import json
 import os
 from typing import Optional
 
+import requests
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core import Core
 from config import get_llm_config, get
+
+
+# =============================================================================
+# Shard helpers
+# =============================================================================
+
+
+def _shard_files() -> list[str]:
+    """Get absolute paths of all shard YAML files."""
+    shards_dir = os.path.join(os.path.dirname(__file__), "shards")
+    if not os.path.exists(shards_dir):
+        return []
+    return glob.glob(os.path.join(shards_dir, "*.yaml"))
 
 
 # =============================================================================
@@ -43,23 +59,18 @@ def root():
 @app.get("/api/v1/shards")
 def list_shards():
     """List available shards."""
-    shards_dir = os.path.join(os.path.dirname(__file__), "shards")
     shards = []
 
-    if os.path.exists(shards_dir):
-        import glob
-        import yaml
+    for filepath in _shard_files():
+        with open(filepath) as f:
+            data = yaml.safe_load(f)
+            if data and "name" in data:
+                shards.append({
+                    "name": data.get("name"),
+                    "display_name": data.get("display_name", data["name"]),
+                })
 
-        for filepath in glob.glob(os.path.join(shards_dir, "*.yaml")):
-            with open(filepath) as f:
-                data = yaml.safe_load(f)
-                if data and "name" in data:
-                    shards.append({
-                        "name": data.get("name"),
-                        "display_name": data.get("display_name", data["name"]),
-                    })
-
-    # Always include default shard
+    # Always include default shard (backed by config defaults, not a file)
     if not any(s["name"] == "default" for s in shards):
         shards.append({"name": "default", "display_name": "Default"})
 
@@ -68,19 +79,14 @@ def list_shards():
 
 def _load_shard(shard_name: str) -> dict:
     """Load shard config by name."""
-    shards_dir = os.path.join(os.path.dirname(__file__), "shards")
     shard = None
 
-    if os.path.exists(shards_dir):
-        import glob
-        import yaml
-
-        for filepath in glob.glob(os.path.join(shards_dir, "*.yaml")):
-            with open(filepath) as f:
-                data = yaml.safe_load(f)
-                if data and data.get("name") == shard_name:
-                    shard = data
-                    break
+    for filepath in _shard_files():
+        with open(filepath) as f:
+            data = yaml.safe_load(f)
+            if data and data.get("name") == shard_name:
+                shard = data
+                break
 
     if shard is None:
         # Build from config defaults
@@ -118,8 +124,6 @@ async def send_message(req: MessageRequest):
     The harness controls the agent loop: after each LLM turn, if tools were
     executed and context was rebuilt, it calls run_stream() again for the next turn.
     """
-    import requests
-
     shard = _load_shard(req.shard_name)
     llm = get_llm_config("primary")
 

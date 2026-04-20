@@ -10,19 +10,13 @@ It knows nothing about LLM calls, tool execution, or the agent loop.
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 import requests
 from config import get
-
-
-# =============================================================================
-# Constants
-# =============================================================================
-
-
 
 
 # =============================================================================
@@ -73,7 +67,6 @@ class MemoryClient:
     """
     
     def __init__(self, base_url: str = None, session_id: str = None):
-        self.session_id = session_id
         self.base_url = base_url or get('memory_api.url')
         self.session_id = session_id
     
@@ -212,7 +205,6 @@ class ContextManager:
             
             # Parse embedded tool_calls from content if present
             if msg.get('role') == 'assistant' and msg.get('content') and '[tool_calls]' in msg.get('content', ''):
-                import re
                 content = msg['content']
                 tc_match = re.search(r'\[tool_calls\](.+?)\[/tool_calls\]', content)
                 if tc_match:
@@ -303,8 +295,7 @@ class ContextManager:
                     self._tool_max_lines,
                     self._tool_char_per_line
                 )
-                if len(msg['content']) < original_len:
-                    pass  # Truncation happened silently
+                # Truncation happened silently
         
         # Add system prompt at the front
         system = self.build_system_prompt(system_template, registry)
