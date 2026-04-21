@@ -255,17 +255,38 @@ class ContextManager:
         history: list[dict],
         system_template: str,
         registry,
+        include_timestamp: bool = None,
     ) -> tuple[list[dict], str]:
         """Build messages for LLM from history, including system prompt.
+        
+        Args:
+            history: Message history from memory API
+            system_template: System prompt template with {tag} placeholders
+            registry: Module registry for building context
+            include_timestamp: Override for timestamp prefix (default from config)
         
         Returns (api_messages, system_prompt) where api_messages has system
         prompt prepended and messages are processed (reordered, truncated).
         """
-        # Build api_messages from history (filter internal fields)
-        api_messages = [
-            {k: v for k, v in msg.items() if k not in ('id', 'created_at')}
-            for msg in history
-        ]
+        # Check config for timestamp preference (default to False if not set)
+        if include_timestamp is None:
+            include_timestamp = get('memory_api.include_timestamp', False)
+        
+        # Build api_messages from history (filter internal fields, optionally add timestamp)
+        api_messages = []
+        for msg in history:
+            msg_copy = {k: v for k, v in msg.items() if k not in ('id', 'created_at')}
+            
+            # Prepend timestamp to content if enabled and created_at is present
+            if include_timestamp and msg.get('created_at') and msg_copy.get('content'):
+                try:
+                    ts = datetime.fromisoformat(msg['created_at'].replace('Z', '+00:00'))
+                    timestamp_str = ts.strftime('%Y-%m-%d %H:%M')
+                    msg_copy['content'] = f"[{timestamp_str}] {msg_copy['content']}"
+                except (ValueError, TypeError):
+                    pass  # Skip timestamp if parsing fails
+            
+            api_messages.append(msg_copy)
         
         # Reorder: ensure tool results follow their assistant message
         api_messages = self.reorder_messages(api_messages)

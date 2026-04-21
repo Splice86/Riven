@@ -11,6 +11,8 @@ server:
 memory_api:
   db_name: "riven"
   url: "http://127.0.0.1:8030"  # Template fallback
+  # Prepend [YYYY-MM-DD HH:MM] timestamp to context content
+  include_timestamp: true
 
 # Named LLM configs (URLs here are templates, secrets in secrets.yaml)
 # Shards reference these by name: llm_config: primary
