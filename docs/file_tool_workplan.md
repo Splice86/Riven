@@ -16,8 +16,8 @@ from each while keeping Riven's superior fuzzy matching.
 |---|--------|--------|----------|--------|--------|--------|
 | 1.1 | Add `threshold` parameter to `_find_best_window()` | Internal | 🔴 High | Fail fast, configurable strictness | ⭐ Low | ✅ DONE |
 | 1.2 | Add `.rstrip('\n')` before Jaro-Winkler comparison | Internal | 🔴 High | Fix subtle matching bugs | ⭐ Low | ✅ DONE |
-| 1.3 | Create `EditResult` dataclass for structured responses | Code Puppy | 🔴 High | Machine-readable, better for agents | ⭐ Low | 🔄 IN PROGRESS |
-| 1.4 | Create `Replacement` dataclass for batch operations | Code Puppy | 🟡 Med | Foundation for batch edits | ⭐ Low | ⏳ TODO |
+| 1.3 | Create `EditResult` dataclass for structured responses | Code Puppy | 🔴 High | Machine-readable, better for agents | ⭐ Low | ✅ DONE |
+| 1.4 | Create `Replacement` dataclass for batch operations | Code Puppy | 🟡 Med | Foundation for batch edits | ⭐ Low | ✅ DONE |
 
 ### Details
 
@@ -391,10 +391,11 @@ riven/
 ## Checklist
 
 ### Phase 1: Core
-- [ ] Add `threshold` parameter to `_find_best_window()` in `modules/file.py`
-- [ ] Add `.rstrip('\n')` before comparison in `_find_best_window()`
-- [ ] Create `EditResult` dataclass in `modules/file_editor.py`
-- [ ] Create `Replacement` dataclass in `modules/file_editor.py`
+- [x] Add `threshold` parameter to `_find_best_window()` in `modules/file.py`
+- [x] Add `.rstrip('\n')` before comparison in `_find_best_window()`
+- [x] Create `EditResult` dataclass in `modules/file.py`
+- [x] Create `Replacement` dataclass in `modules/file.py`
+- [x] Create `FileEditSession` dataclass in `modules/file.py`
 
 ### Phase 2: Robustness
 - [ ] Create `_atomic_write()` helper in `modules/file_editor.py`
@@ -450,6 +451,10 @@ riven/
 ## Status
 
 - [ ] Phase 1 Complete
+  - [x] 1.1 Add threshold parameter to _find_best_window
+  - [x] 1.2 Add .rstrip('\n') before comparison
+  - [x] 1.3 Create EditResult dataclass
+  - [x] 1.4 Create Replacement dataclass
 - [ ] Phase 2 Complete
 - [ ] Phase 3 Complete
 - [ ] Phase 4 Complete
