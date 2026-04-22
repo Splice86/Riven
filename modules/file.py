@@ -17,14 +17,139 @@ Session ID is automatically available via get_session_id().
 
 import os
 import subprocess
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import requests
 import jellyfish
 
 from modules import CalledFn, ContextFn, Module, get_session_id
 from modules.memory_utils import _search_memories, _delete_memory, _get_memory, _set_memory, _get_memory_url
+
+
+# =============================================================================
+# Data Classes for Structured Responses
+# =============================================================================
+
+@dataclass
+class EditResult:
+    """Structured result for file edit operations.
+
+    Provides machine-readable results for all file editing operations,
+    making it easier to build agents and debug issues.
+    """
+    success: bool
+    path: str
+    message: str
+    changed: bool = False
+    diff: str = ""
+    line_start: int | None = None
+    line_end: int | None = None
+    similarity: float | None = None
+    syntax_error: str | None = None
+
+    def to_string(self) -> str:
+        """Convert to user-friendly string.
+
+        Returns a formatted string suitable for displaying to users
+        or logging. Includes all relevant details.
+        """
+        if self.success:
+            parts = [f"✅ {self.message}"]
+            if self.line_start and self.line_end:
+                parts.append(f"   Lines {self.line_start}-{self.line_end}")
+            if self.similarity:
+                parts.append(f"   Match: {self.similarity:.0%}")
+            if self.diff:
+                parts.append(f"\n{self.diff}")
+            return "\n".join(parts)
+        else:
+            parts = [f"❌ {self.message}"]
+            if self.similarity:
+                parts.append(f"   Best match: {self.similarity:.0%}")
+            if self.syntax_error:
+                parts.append(f"   Syntax error: {self.syntax_error}")
+            if self.diff:
+                parts.append(f"\n{self.diff}")
+            return "\n".join(parts)
+
+    def __str__(self) -> str:
+        """String representation for logging."""
+        return self.to_string()
+
+
+@dataclass
+class Replacement:
+    """A single text replacement for batch operations.
+
+    Represents one old_text -> new_text transformation to be applied
+    to a file. Used by batch_edit() to apply multiple replacements
+    in a single pass.
+    """
+    old_str: str
+    new_str: str
+
+    def __post_init__(self):
+        """Validate replacement data."""
+        if not isinstance(self.old_str, str):
+            raise TypeError(f"old_str must be str, got {type(self.old_str)}")
+        if not isinstance(self.new_str, str):
+            raise TypeError(f"new_str must be str, got {type(self.new_str)}")
+
+
+@dataclass
+class FileEditSession:
+    """A session of related file edits, persisted in MemoryDB.
+
+    Tracks a complete edit operation including all files modified,
+    the diff, and original content snapshots for undo/redo support.
+    """
+    session_id: str
+    tool_name: str
+    files: list[str] = field(default_factory=list)
+    operations: int = 0
+    created_at: datetime = field(default_factory=datetime.now)
+    status: Literal["pending", "completed", "failed", "rolled_back"] = "pending"
+    diff: str = ""
+    original_snapshots: dict[str, str] = field(default_factory=dict)
+    modified_snapshots: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "session_id": self.session_id,
+            "tool_name": self.tool_name,
+            "files": self.files,
+            "operations": self.operations,
+            "created_at": self.created_at.isoformat(),
+            "status": self.status,
+            "diff": self.diff,
+            "original_snapshots": self.original_snapshots,
+            "modified_snapshots": self.modified_snapshots,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FileEditSession":
+        """Create from dictionary (e.g., from MemoryDB)."""
+        created_at = data.get("created_at")
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        elif created_at is None:
+            created_at = datetime.now()
+
+        return cls(
+            session_id=data["session_id"],
+            tool_name=data["tool_name"],
+            files=data.get("files", []),
+            operations=data.get("operations", 0),
+            created_at=created_at,
+            status=data.get("status", "pending"),
+            diff=data.get("diff", ""),
+            original_snapshots=data.get("original_snapshots", {}),
+            modified_snapshots=data.get("modified_snapshots", {}),
+        )
 
 
 def _count_tokens(text: str) -> int:

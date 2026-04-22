@@ -5,10 +5,254 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+class TestEditResult:
+    """Test EditResult dataclass for structured responses."""
+
+    def test_successful_result_creates_string(self):
+        """EditResult.to_string() formats success message correctly."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=True,
+            path="/tmp/test.py",
+            message="Replaced lines 10-15",
+            changed=True,
+            line_start=10,
+            line_end=15,
+            similarity=0.95,
+        )
+
+        output = result.to_string()
+
+        assert "✅" in output
+        assert "Replaced lines 10-15" in output
+        assert "Lines 10-15" in output
+        assert "95%" in output
+
+    def test_failed_result_creates_string(self):
+        """EditResult.to_string() formats error message correctly."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=False,
+            path="/tmp/test.py",
+            message="Text not found",
+            similarity=0.72,
+        )
+
+        output = result.to_string()
+
+        assert "❌" in output
+        assert "Text not found" in output
+        assert "72%" in output
+
+    def test_failed_result_with_syntax_error(self):
+        """EditResult shows syntax error details for failed Python edits."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=False,
+            path="/tmp/test.py",
+            message="Syntax validation failed",
+            syntax_error="Syntax error at line 5: invalid syntax",
+        )
+
+        output = result.to_string()
+
+        assert "Syntax validation failed" in output
+        assert "Syntax error" in output
+        assert "line 5" in output
+
+    def test_result_with_diff(self):
+        """EditResult includes diff in output when present."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=True,
+            path="/tmp/test.py",
+            message="Applied replacement",
+            changed=True,
+            diff="--- a/test.py\n+++ b/test.py\n@@ -1 +1 @@\n-old\n+new",
+        )
+
+        output = result.to_string()
+
+        assert "--- a/test.py" in output
+        assert "+new" in output
+
+    def test_result_optional_fields_omitted_when_none(self):
+        """EditResult omits optional fields when they are None."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=True,
+            path="/tmp/test.py",
+            message="Success",
+        )
+
+        output = result.to_string()
+
+        assert "Success" in output
+        assert "Lines" not in output
+        assert "%" not in output
+
+    def test_str_dunder_calls_to_string(self):
+        """str(result) returns same as result.to_string()."""
+        from modules.file import EditResult
+
+        result = EditResult(
+            success=True,
+            path="/tmp/test.py",
+            message="Success",
+        )
+
+        assert str(result) == result.to_string()
+
+
+class TestReplacement:
+    """Test Replacement dataclass for batch operations."""
+
+    def test_creates_replacement_with_valid_data(self):
+        """Replacement accepts old_str and new_str."""
+        from modules.file import Replacement
+
+        rep = Replacement(old_str="old text", new_str="new text")
+
+        assert rep.old_str == "old text"
+        assert rep.new_str == "new text"
+
+    def test_rejects_non_string_old_str(self):
+        """Replacement raises TypeError if old_str is not a string."""
+        from modules.file import Replacement
+
+        with pytest.raises(TypeError):
+            Replacement(old_str=123, new_str="new text")
+
+    def test_rejects_non_string_new_str(self):
+        """Replacement raises TypeError if new_str is not a string."""
+        from modules.file import Replacement
+
+        with pytest.raises(TypeError):
+            Replacement(old_str="old text", new_str=456)
+
+    def test_empty_strings_allowed(self):
+        """Replacement allows empty strings (useful for insert/delete)."""
+        from modules.file import Replacement
+
+        rep = Replacement(old_str="", new_str="inserted")
+        assert rep.old_str == ""
+        assert rep.new_str == "inserted"
+
+        rep2 = Replacement(old_str="deleted", new_str="")
+        assert rep2.old_str == "deleted"
+        assert rep2.new_str == ""
+
+
+class TestFileEditSession:
+    """Test FileEditSession dataclass for tracking edit operations."""
+
+    def test_creates_session_with_required_fields(self):
+        """FileEditSession requires session_id and tool_name."""
+        from modules.file import FileEditSession
+
+        session = FileEditSession(
+            session_id="edit_abc123",
+            tool_name="batch_edit",
+        )
+
+        assert session.session_id == "edit_abc123"
+        assert session.tool_name == "batch_edit"
+        assert session.status == "pending"
+        assert session.files == []
+        assert session.operations == 0
+
+    def test_creates_session_with_all_fields(self):
+        """FileEditSession accepts all optional fields."""
+        from modules.file import FileEditSession
+
+        session = FileEditSession(
+            session_id="edit_xyz789",
+            tool_name="single_edit",
+            files=["/tmp/file1.py", "/tmp/file2.py"],
+            operations=2,
+            status="completed",
+            diff="--- diff here ---",
+            original_snapshots={"/tmp/file1.py": "original content"},
+            modified_snapshots={"/tmp/file1.py": "new content"},
+        )
+
+        assert len(session.files) == 2
+        assert session.operations == 2
+        assert session.status == "completed"
+        assert "/tmp/file1.py" in session.original_snapshots
+
+    def test_to_dict_serialization(self):
+        """FileEditSession.to_dict() returns JSON-safe dict."""
+        from modules.file import FileEditSession
+
+        session = FileEditSession(
+            session_id="edit_test",
+            tool_name="test_tool",
+        )
+
+        data = session.to_dict()
+
+        assert data["session_id"] == "edit_test"
+        assert data["tool_name"] == "test_tool"
+        assert isinstance(data["created_at"], str)  # ISO format string
+
+    def test_from_dict_deserialization(self):
+        """FileEditSession.from_dict() recreates session from dict."""
+        from modules.file import FileEditSession
+
+        data = {
+            "session_id": "edit_restored",
+            "tool_name": "restored_tool",
+            "files": ["/tmp/restored.py"],
+            "operations": 1,
+            "status": "completed",
+            "created_at": "2025-01-15T10:30:00",
+            "diff": "--- restored ---",
+            "original_snapshots": {},
+            "modified_snapshots": {},
+        }
+
+        session = FileEditSession.from_dict(data)
+
+        assert session.session_id == "edit_restored"
+        assert session.tool_name == "restored_tool"
+        assert session.created_at == datetime(2025, 1, 15, 10, 30, 0)
+        assert session.status == "completed"
+
+    def test_status_defaults_to_pending(self):
+        """FileEditSession status defaults to 'pending'."""
+        from modules.file import FileEditSession
+
+        session = FileEditSession(
+            session_id="edit_default",
+            tool_name="test",
+        )
+
+        assert session.status == "pending"
+
+    def test_valid_statuses(self):
+        """FileEditSession accepts all valid status values."""
+        from modules.file import FileEditSession
+
+        for status in ["pending", "completed", "failed", "rolled_back"]:
+            session = FileEditSession(
+                session_id=f"edit_{status}",
+                tool_name="test",
+                status=status,
+            )
+            assert session.status == status
 
 
 class TestFileModuleRegistration:
