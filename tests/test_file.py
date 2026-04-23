@@ -255,7 +255,156 @@ class TestFileEditSession:
             assert session.status == status
 
 
-class TestFileModuleRegistration:
+class TestAtomicWrite:
+    """Test _atomic_write for robust file writing."""
+
+    def test_atomic_write_creates_file(self):
+        """_atomic_write creates the file with correct content."""
+        from modules.file import _atomic_write
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            content = "Hello, atomic world!\n"
+            _atomic_write(tmp_path, content)
+
+            with open(tmp_path, 'r') as f:
+                assert f.read() == content
+        finally:
+            os.unlink(tmp_path)
+
+    def test_atomic_write_overwrites_existing(self):
+        """_atomic_write overwrites existing file content."""
+        from modules.file import _atomic_write
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write("original content")
+            tmp_path = tmp.name
+
+        try:
+            new_content = "new content\n"
+            _atomic_write(tmp_path, new_content)
+
+            with open(tmp_path, 'r') as f:
+                assert f.read() == new_content
+        finally:
+            os.unlink(tmp_path)
+
+    def test_atomic_write_creates_parent_dirs(self):
+        """_atomic_write creates parent directories if needed."""
+        from modules.file import _atomic_write
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested_path = os.path.join(tmpdir, "a", "b", "c", "file.txt")
+
+            _atomic_write(nested_path, "nested content\n")
+
+            with open(nested_path, 'r') as f:
+                assert f.read() == "nested content\n"
+
+    def test_atomic_write_handles_empty_content(self):
+        """_atomic_write handles empty content correctly."""
+        from modules.file import _atomic_write
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            _atomic_write(tmp_path, "")
+
+            with open(tmp_path, 'r') as f:
+                assert f.read() == ""
+        finally:
+            os.unlink(tmp_path)
+
+    def test_atomic_write_handles_large_content(self):
+        """_atomic_write handles large content correctly."""
+        from modules.file import _atomic_write
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            large_content = "x" * 100000  # 100KB
+            _atomic_write(tmp_path, large_content)
+
+            with open(tmp_path, 'r') as f:
+                assert len(f.read()) == 100000
+        finally:
+            os.unlink(tmp_path)
+
+    def test_atomic_write_cleans_up_temp_on_error(self):
+        """_atomic_write cleans up temp file on error."""
+        from modules.file import _atomic_write
+
+        import unittest.mock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_path = os.path.join(tmpdir, "file.txt")
+            content = "test content"
+
+            # Mock os.replace to raise an error after the write succeeds
+            original_replace = os.replace
+            call_count = [0]
+
+            def mock_replace(src, dst):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise OSError("mocked error")
+                return original_replace(src, dst)
+
+            with unittest.mock.patch('os.replace', side_effect=mock_replace):
+                with pytest.raises(OSError):
+                    _atomic_write(temp_path, content)
+
+            # No temp files should remain in the directory
+            files_after = os.listdir(tmpdir)
+            assert len(files_after) == 0, f"Temp file not cleaned up: {files_after}"
+
+
+class TestVerifyWrite:
+    """Test _verify_write for post-write verification."""
+
+    def test_verify_write_returns_true_for_match(self):
+        """_verify_write returns True when content matches."""
+        from modules.file import _verify_write
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write("test content")
+            tmp_path = tmp.name
+
+        try:
+            assert _verify_write(tmp_path, "test content") is True
+        finally:
+            os.unlink(tmp_path)
+
+    def test_verify_write_returns_false_for_mismatch(self):
+        """_verify_write returns False when content differs."""
+        from modules.file import _verify_write
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+            tmp.write("original content")
+            tmp_path = tmp.name
+
+        try:
+            assert _verify_write(tmp_path, "different content") is False
+        finally:
+            os.unlink(tmp_path)
+
+    def test_verify_write_returns_false_for_missing_file(self):
+        """_verify_write returns False for non-existent file."""
+        from modules.file import _verify_write
+
+        assert _verify_write("/nonexistent/path/file.txt", "content") is False
+
+    def test_verify_write_returns_false_on_read_error(self):
+        """_verify_write returns False when file can't be read."""
+        from modules.file import _verify_write
+
+        # Even if file exists but can't be read
+        # (this is hard to test without chmod tricks, so we test missing file)
+        assert _verify_write("/root/.hidden_file", "content") is False
     """Test that file module is correctly registered."""
 
     def test_file_help_is_static_context_fn(self):

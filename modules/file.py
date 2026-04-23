@@ -17,6 +17,7 @@ Session ID is automatically available via get_session_id().
 
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -150,6 +151,67 @@ class FileEditSession:
             original_snapshots=data.get("original_snapshots", {}),
             modified_snapshots=data.get("modified_snapshots", {}),
         )
+
+
+# =============================================================================
+# Robustness Helpers
+# =============================================================================
+
+def _atomic_write(path: str, content: str) -> None:
+    """Write content atomically using temp file + rename.
+
+    Prevents partial writes if the process is interrupted mid-write.
+    On POSIX systems, os.replace() is atomic. On Windows, we do our best
+    effort with the same pattern.
+
+    Args:
+        path: Target file path
+        content: Content to write
+
+    Raises:
+        OSError: If the write fails after attempting cleanup
+
+    Note:
+        The temp file is always cleaned up, even on failure.
+    """
+    dir_path = os.path.dirname(path) or '.'
+
+    # Create parent directories if needed
+    os.makedirs(dir_path, exist_ok=True)
+
+    fd = None
+    temp_path = None
+    try:
+        fd, temp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
+        os.replace(temp_path, path)  # Atomic on POSIX
+    except Exception:
+        # Clean up temp file on failure
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass  # Best effort cleanup
+        raise
+
+
+def _verify_write(path: str, expected_content: str) -> bool:
+    """Verify that the file on disk matches the expected content.
+
+    Args:
+        path: File path to verify
+        expected_content: Expected content after write
+
+    Returns:
+        True if the file matches, False otherwise
+    """
+    try:
+        with open(path, 'r') as f:
+            actual_content = f.read()
+        return actual_content == expected_content
+    except Exception:
+        return False
 
 
 def _count_tokens(text: str) -> int:
