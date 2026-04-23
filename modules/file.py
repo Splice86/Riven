@@ -920,6 +920,76 @@ async def delete_snippet(path: str, snippet: str, threshold: float = 0.95) -> Ed
     )
 
 
+async def delete_file(path: str) -> EditResult:
+    """Delete a file permanently.
+    
+    Shows what was deleted via unified diff. Uses atomic delete.
+    
+    Args:
+        path: Path to the file to delete
+        
+    Returns:
+        EditResult with success status and diff showing deleted content
+    """
+    path = os.path.expanduser(path)
+    abs_path = os.path.abspath(path)
+    
+    if not os.path.exists(abs_path):
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"File not found: {abs_path}"
+        )
+    
+    if not os.path.isfile(abs_path):
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Not a file: {abs_path}"
+        )
+    
+    # Read content for diff before deleting
+    try:
+        with open(abs_path, 'r') as f:
+            content = f.read()
+        original_lines = content.splitlines(keepends=True)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Error reading {abs_path}: {e}"
+        )
+    
+    # Generate diff showing what was deleted
+    diff = _generate_unified_diff(abs_path, original_lines, [])
+    
+    # Delete the file
+    try:
+        os.remove(abs_path)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Failed to delete {abs_path}: {e}"
+        )
+    
+    # Verify deletion
+    if os.path.exists(abs_path):
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message="File still exists after deletion"
+        )
+    
+    return EditResult(
+        success=True,
+        path=abs_path,
+        message=f"Deleted {os.path.basename(abs_path)}",
+        changed=True,
+        diff=diff
+    )
+
+
 async def close_file(filename: str, line_start: int = None, line_end: int = None) -> str:
     """Close a file by removing its record from memory DB.
     
@@ -1453,6 +1523,21 @@ def get_module():
                     "required": ["path", "snippet"]
                 },
                 fn=delete_snippet,
+            ),
+            CalledFn(
+                name="delete_file",
+                description="Delete a file permanently. Shows unified diff of deleted content.\n\nArgs:\n- path: Path to the file to delete",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to delete"
+                        }
+                    },
+                    "required": ["path"]
+                },
+                fn=delete_file,
             ),
         ],
         context_fns=[

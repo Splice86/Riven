@@ -1442,6 +1442,14 @@ class TestModuleRegistration:
         fn_names = [fn.name for fn in module.called_fns]
         assert "delete_snippet" in fn_names
 
+    def test_delete_file_is_registered(self):
+        """delete_file should be registered in the module."""
+        from modules.file import get_module
+
+        module = get_module()
+        fn_names = [fn.name for fn in module.called_fns]
+        assert "delete_file" in fn_names
+
     def test_replace_text_has_validate_syntax_param(self):
         """replace_text registration should include validate_syntax parameter."""
         from modules.file import get_module
@@ -1449,3 +1457,73 @@ class TestModuleRegistration:
         module = get_module()
         replace_fn = next(fn for fn in module.called_fns if fn.name == "replace_text")
         assert "validate_syntax" in replace_fn.parameters["properties"]
+
+
+class TestDeleteFile:
+    """Tests for delete_file() function."""
+
+    @pytest.mark.asyncio
+    async def test_delete_file_success(self):
+        """delete_file should delete a file and return success."""
+        from modules.file import delete_file
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        result = await delete_file(tmp_path)
+
+        assert result.success is True
+        assert result.changed is True
+        assert "deleted" in result.message.lower()
+        assert not os.path.exists(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_delete_file_not_found(self):
+        """delete_file should return error when file not found."""
+        from modules.file import delete_file
+
+        result = await delete_file("/nonexistent/path/to/file.py")
+
+        assert result.success is False
+        assert "not found" in result.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_file_returns_diff(self):
+        """delete_file should return a diff showing deleted content."""
+        from modules.file import delete_file
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        result = await delete_file(tmp_path)
+
+        assert result.success is True
+        assert result.diff is not None
+        assert "--- " in result.diff
+        assert "+++ " in result.diff
+
+    @pytest.mark.asyncio
+    async def test_delete_file_is_directory(self):
+        """delete_file should return error when path is a directory."""
+        from modules.file import delete_file
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            result = await delete_file(tmp_dir)
+
+            assert result.success is False
+            assert "not a file" in result.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_file_preserves_path_in_result(self):
+        """delete_file should include the path in the result."""
+        from modules.file import delete_file
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("test content")
+            tmp_path = f.name
+
+        result = await delete_file(tmp_path)
+
+        assert os.path.abspath(result.path) == os.path.abspath(tmp_path)
