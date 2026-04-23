@@ -170,17 +170,17 @@ async def chdir(path: str) -> str:
     return await _file_editor.chdir(path)
 
 
-def read_file(path: str, line_start: int = None, line_end: int = None) -> str:
+async def read_file(path: str, line_start: int = None, line_end: int = None) -> str:
     """Read a file and return its content."""
     return _file_editor.read_file(path, line_start, line_end)
 
 
-def list_open_files() -> str:
+async def list_open_files() -> str:
     """List all open files for current session."""
     return _file_editor.list_open_files()
 
 
-def get_file_history(path: str = None) -> str:
+async def get_file_history(path: str = None) -> str:
     """Get file change history.
     
     Args:
