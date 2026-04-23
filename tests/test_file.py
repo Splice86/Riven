@@ -405,7 +405,134 @@ class TestVerifyWrite:
         # Even if file exists but can't be read
         # (this is hard to test without chmod tricks, so we test missing file)
         assert _verify_write("/root/.hidden_file", "content") is False
-    """Test that file module is correctly registered."""
+
+
+class TestSanitizeContent:
+    """Test _sanitize_content for encoding edge cases."""
+
+    def test_clean_content_unchanged(self):
+        """_sanitize_content leaves clean content unchanged."""
+        from modules.file import _sanitize_content
+
+        content = "Hello, world!\nThis is normal text."
+        assert _sanitize_content(content) == content
+
+    def test_removes_high_surrogates(self):
+        """_sanitize_content removes high surrogates (U+D800-U+DBFF)."""
+        from modules.file import _sanitize_content
+
+        # U+D800 is a high surrogate
+        content = "Hello\ud800World"
+        result = _sanitize_content(content)
+        assert "\ud800" not in result
+
+    def test_removes_low_surrogates(self):
+        """_sanitize_content removes low surrogates (U+DC00-U+DFFF)."""
+        from modules.file import _sanitize_content
+
+        # U+DFFF is a low surrogate
+        content = "Hello\udfffWorld"
+        result = _sanitize_content(content)
+        assert "\udfff" not in result
+
+    def test_replaces_surrogates_with_replacement_char(self):
+        """_sanitize_content replaces surrogates with Unicode replacement char."""
+        from modules.file import _sanitize_content
+
+        content = "Test\ud800 surrogate"
+        result = _sanitize_content(content)
+        assert "\ufffd" in result  # Unicode replacement character
+
+    def test_handles_mixed_surrogates(self):
+        """_sanitize_content handles mixed surrogate pairs."""
+        from modules.file import _sanitize_content
+
+        # Invalid surrogate sequence
+        content = "Line1\nLine2\ud800\udfff\nLine3"
+        result = _sanitize_content(content)
+        # Should not raise, should replace surrogates
+        assert isinstance(result, str)
+
+    def test_handles_empty_string(self):
+        """_sanitize_content handles empty string."""
+        from modules.file import _sanitize_content
+
+        assert _sanitize_content("") == ""
+
+    def test_handles_unicode_content(self):
+        """_sanitize_content preserves valid Unicode."""
+        from modules.file import _sanitize_content
+
+        content = "Hello, 世界! 🎉 émoji"
+        assert _sanitize_content(content) == content
+
+
+class TestValidatePython:
+    """Test _validate_python for syntax checking."""
+
+    def test_valid_python_returns_true(self):
+        """_validate_python returns True for valid Python code."""
+        from modules.file import _validate_python
+
+        valid_code = "def hello():\n    return 'world'\n"
+        is_valid, error = _validate_python(valid_code)
+        assert is_valid is True
+        assert error is None
+
+    def test_valid_python_with_complex_code(self):
+        """_validate_python handles complex but valid Python."""
+        from modules.file import _validate_python
+
+        valid_code = """
+class MyClass:
+    def __init__(self, x):
+        self.x = x
+
+    def method(self, y):
+        return self.x + y
+
+result = MyClass(10).method(5)
+"""
+        is_valid, error = _validate_python(valid_code)
+        assert is_valid is True
+        assert error is None
+
+    def test_syntax_error_returns_false(self):
+        """_validate_python returns False for invalid syntax."""
+        from modules.file import _validate_python
+
+        invalid_code = "def broken(:\n    pass"  # Missing parameter name
+        is_valid, error = _validate_python(invalid_code)
+        assert is_valid is False
+        assert error is not None
+        assert "Syntax error" in error
+
+    def test_syntax_error_includes_line_number(self):
+        """_validate_python includes line number in error message."""
+        from modules.file import _validate_python
+
+        invalid_code = "line1\nline2\nline3\n    bad indentation here"
+        is_valid, error = _validate_python(invalid_code)
+        assert is_valid is False
+        assert "line 4" in error or "line 4" in str(error)
+
+    def test_empty_string_returns_true(self):
+        """_validate_python accepts empty string."""
+        from modules.file import _validate_python
+
+        is_valid, error = _validate_python("")
+        assert is_valid is True
+
+    def test_whitespace_only_returns_true(self):
+        """_validate_python accepts whitespace-only content."""
+        from modules.file import _validate_python
+
+        is_valid, error = _validate_python("   \n\n   \t   \n")
+        assert is_valid is True
+
+
+class TestModuleRegistration:
+    """Test module registration and CalledFn/ContextFn setup."""
 
     def test_file_help_is_static_context_fn(self):
         """Verify _file_help is registered as a static ContextFn."""
@@ -643,7 +770,7 @@ class TestReplaceText:
             result = await replace_text(
                 tmp_path,
                 "prnt('hello world')",  # typo 'prnt' instead of 'print'
-                "print('hello planet')",
+                "    print('hello planet')",  # Note: properly indented
                 threshold=0.6
             )
             # Should succeed with lower threshold instead of failing
@@ -871,3 +998,454 @@ class TestFileInfo:
 
         result = await file_info("/nonexistent/file.py")
         assert "not found" in result.lower()
+
+
+class TestPwd:
+    """Tests for pwd() function."""
+
+    @pytest.mark.asyncio
+    async def test_pwd_returns_current_directory(self):
+        """pwd should return the current working directory."""
+        from modules.file import pwd
+
+        result = await pwd()
+
+        # Should return a valid directory path
+        assert result is not None
+        assert isinstance(result, str)
+        assert len(result) > 0
+        # Should be an absolute path
+        assert os.path.isabs(result) or result.startswith('/')
+
+
+class TestChdir:
+    """Tests for chdir() function."""
+
+    @pytest.mark.asyncio
+    async def test_chdir_to_existing_directory(self):
+        """chdir should change to an existing directory."""
+        from modules import _session_id
+        from modules.file import chdir
+
+        _session_id.set("test-session-chdir")
+
+        # Use a known existing directory
+        result = await chdir("/tmp")
+
+        assert result == os.path.abspath("/tmp")
+
+    @pytest.mark.asyncio
+    async def test_chdir_to_nonexistent_raises(self):
+        """chdir to non-existent path should raise FileNotFoundError."""
+        from modules.file import chdir
+
+        with pytest.raises(FileNotFoundError):
+            await chdir("/nonexistent/directory/that/does/not/exist")
+
+    @pytest.mark.asyncio
+    async def test_chdir_to_file_raises(self):
+        """chdir to a file path should raise NotADirectoryError."""
+        from modules.file import chdir
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            tmp_path = f.name
+
+        try:
+            with pytest.raises(NotADirectoryError):
+                await chdir(tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestCloseAllFiles:
+    """Tests for close_all_files() function."""
+
+    @pytest.mark.asyncio
+    async def test_close_all_files_clears_memory(self):
+        """close_all_files should clear all file entries from memory."""
+        from modules import _session_id
+        from modules.file import close_all_files, open_file
+
+        _session_id.set("test-session-closeall")
+
+        # Create a temp file and open it
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("test content\n")
+            tmp_path = f.name
+
+        try:
+            with patch("modules.file.requests.post") as mock_post:
+                mock_post.return_value = MagicMock(status_code=200)
+                await open_file(tmp_path)
+
+            # Close all files
+            result = await close_all_files()
+
+            assert "Closed" in result
+            assert "open files" in result
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_close_all_files_when_none_open(self):
+        """close_all_files should return 0 when no files are open."""
+        from modules import _session_id
+        from modules.file import close_all_files
+
+        _session_id.set("test-session-closeall-empty")
+
+        result = await close_all_files()
+
+        assert "Closed 0" in result
+
+
+class TestWriteText:
+    """Tests for write_text() function."""
+
+    @pytest.mark.asyncio
+    async def test_write_text_creates_file(self):
+        """write_text should create a new file with the given content."""
+        from modules.file import write_text
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, "new_file.py")
+            content = "def hello():\n    return 'world'\n"
+
+            result = await write_text(file_path, content)
+
+            # File should exist
+            assert os.path.exists(file_path)
+            # Content should match
+            with open(file_path, 'r') as f:
+                assert f.read() == content
+            # Result should mention file info
+            assert "new_file.py" in result
+            assert "1 lines" in result or "2 lines" in result
+
+    @pytest.mark.asyncio
+    async def test_write_text_overwrites_existing(self):
+        """write_text should overwrite an existing file."""
+        from modules.file import write_text
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, "existing.py")
+
+            # Create initial file
+            with open(file_path, 'w') as f:
+                f.write("original content\n")
+
+            # Overwrite with new content
+            new_content = "new content\n"
+            result = await write_text(file_path, new_content)
+
+            # Content should be new
+            with open(file_path, 'r') as f:
+                assert f.read() == new_content
+            assert "existing.py" in result
+
+    @pytest.mark.asyncio
+    async def test_write_text_creates_parent_dirs(self):
+        """write_text should create parent directories if they don't exist."""
+        from modules.file import write_text
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            nested_path = os.path.join(tmp_dir, "a", "b", "c", "nested.py")
+            content = "# nested file\n"
+
+            result = await write_text(nested_path, content)
+
+            assert os.path.exists(nested_path)
+            assert "nested.py" in result
+
+    @pytest.mark.asyncio
+    async def test_write_text_empty_content(self):
+        """write_text should handle empty content."""
+        from modules.file import write_text
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, "empty.py")
+
+            result = await write_text(file_path, "")
+
+            assert os.path.exists(file_path)
+            with open(file_path, 'r') as f:
+                assert f.read() == ""
+            assert "empty.py" in result
+
+    @pytest.mark.asyncio
+    async def test_write_text_large_content(self):
+        """write_text should handle large content."""
+        from modules.file import write_text
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, "large.py")
+            # Generate ~100KB of content
+            content = "x" * 100000
+
+            result = await write_text(file_path, content)
+
+            assert os.path.exists(file_path)
+            with open(file_path, 'r') as f:
+                assert len(f.read()) == 100000
+
+
+class TestBatchEdit:
+    """Tests for batch_edit() function."""
+
+    @pytest.mark.asyncio
+    async def test_batch_edit_single_replacement(self):
+        """batch_edit should apply a single replacement."""
+        from modules.file import batch_edit, Replacement
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            replacements = [Replacement(old_str="    return 'world'", new_str="    return 'planet'")]
+            result = await batch_edit(tmp_path, replacements)
+
+            assert result.success is True
+            assert result.changed is True
+            assert "1 replacement" in result.message
+            with open(tmp_path, 'r') as f:
+                assert "return 'planet'" in f.read()
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_batch_edit_multiple_replacements(self):
+        """batch_edit should apply multiple replacements in one operation."""
+        from modules.file import batch_edit, Replacement
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def foo():\n    x = 1\n    y = 2\n    return x\n")
+            tmp_path = f.name
+
+        try:
+            replacements = [
+                Replacement(old_str="    x = 1", new_str="    x = 10"),
+                Replacement(old_str="    y = 2", new_str="    y = 20"),
+            ]
+            result = await batch_edit(tmp_path, replacements)
+
+            assert result.success is True
+            assert "2 replacement" in result.message
+            with open(tmp_path, 'r') as f:
+                content = f.read()
+                assert "x = 10" in content
+                assert "y = 20" in content
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_batch_edit_not_found(self):
+        """batch_edit should return error when text not found."""
+        from modules.file import batch_edit, Replacement
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            replacements = [Replacement(old_str="nonexistent text", new_str="something")]
+            result = await batch_edit(tmp_path, replacements)
+
+            assert result.success is False
+            assert "not found" in result.message.lower() or "no match" in result.message.lower()
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_batch_edit_syntax_validation(self):
+        """batch_edit should validate Python syntax for .py files."""
+        from modules.file import batch_edit, Replacement
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            # This replacement would create invalid syntax (no indentation)
+            replacements = [Replacement(old_str="def hello():", new_str="def broken")]
+            result = await batch_edit(tmp_path, replacements)
+
+            assert result.success is False
+            assert "syntax" in result.message.lower()
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_batch_edit_returns_diff(self):
+        """batch_edit should return a diff of changes."""
+        from modules.file import batch_edit, Replacement
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            replacements = [Replacement(old_str="    return 'world'", new_str="    return 'planet'")]
+            result = await batch_edit(tmp_path, replacements)
+
+            assert result.success is True
+            assert result.diff is not None
+            assert "--- " in result.diff
+            assert "+++ " in result.diff
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestDeleteSnippet:
+    """Tests for delete_snippet() function."""
+
+    @pytest.mark.asyncio
+    async def test_delete_snippet_success(self):
+        """delete_snippet should remove the first occurrence of a snippet."""
+        from modules.file import delete_snippet
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    print('hello')\n    return True\n")
+            tmp_path = f.name
+
+        try:
+            result = await delete_snippet(tmp_path, "    print('hello')")
+
+            assert result.success is True
+            assert result.changed is True
+            assert "deleted" in result.message.lower()
+            with open(tmp_path, 'r') as f:
+                content = f.read()
+                assert "print('hello')" not in content
+                assert "return True" in content
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_delete_snippet_not_found(self):
+        """delete_snippet should return error when snippet not found."""
+        from modules.file import delete_snippet
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return True\n")
+            tmp_path = f.name
+
+        try:
+            result = await delete_snippet(tmp_path, "nonexistent snippet")
+
+            assert result.success is False
+            assert "not found" in result.message.lower() or "no match" in result.message.lower()
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_delete_snippet_returns_diff(self):
+        """delete_snippet should return a diff showing the deletion."""
+        from modules.file import delete_snippet
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    print('hello')\n    return True\n")
+            tmp_path = f.name
+
+        try:
+            result = await delete_snippet(tmp_path, "    print('hello')")
+
+            assert result.success is True
+            assert result.diff is not None
+            assert "--- " in result.diff
+            assert "+++ " in result.diff
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_delete_snippet_fuzzy_match(self):
+        """delete_snippet should use fuzzy matching."""
+        from modules.file import delete_snippet
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    print('hello')\n    return True\n")
+            tmp_path = f.name
+
+        try:
+            # Use slightly different text (typo) - should still match with lower threshold
+            result = await delete_snippet(tmp_path, "  prnt('hello')", threshold=0.6)
+
+            assert result.success is True
+            assert result.changed is True
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestDiffTextUpdated:
+    """Tests for updated diff_text() with unified diff."""
+
+    @pytest.mark.asyncio
+    async def test_diff_text_returns_unified_diff(self):
+        """diff_text should return unified diff format."""
+        from modules.file import diff_text
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            result = await diff_text(
+                tmp_path,
+                "    return 'world'",
+                "    return 'planet'"
+            )
+
+            assert "--- " in result
+            assert "+++ " in result
+            assert "unified diff" in result.lower()
+        finally:
+            os.unlink(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_diff_text_not_found(self):
+        """diff_text should return error when text not found."""
+        from modules.file import diff_text
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write("def hello():\n    return 'world'\n")
+            tmp_path = f.name
+
+        try:
+            result = await diff_text(
+                tmp_path,
+                "nonexistent text",
+                "some replacement"
+            )
+
+            assert "Cannot diff" in result
+            assert "not found" in result.lower() or "cannot diff" in result.lower()
+        finally:
+            os.unlink(tmp_path)
+
+
+class TestModuleRegistration:
+    """Tests for new function registrations."""
+
+    def test_batch_edit_is_registered(self):
+        """batch_edit should be registered in the module."""
+        from modules.file import get_module
+
+        module = get_module()
+        fn_names = [fn.name for fn in module.called_fns]
+        assert "batch_edit" in fn_names
+
+    def test_delete_snippet_is_registered(self):
+        """delete_snippet should be registered in the module."""
+        from modules.file import get_module
+
+        module = get_module()
+        fn_names = [fn.name for fn in module.called_fns]
+        assert "delete_snippet" in fn_names
+
+    def test_replace_text_has_validate_syntax_param(self):
+        """replace_text registration should include validate_syntax parameter."""
+        from modules.file import get_module
+
+        module = get_module()
+        replace_fn = next(fn for fn in module.called_fns if fn.name == "replace_text")
+        assert "validate_syntax" in replace_fn.parameters["properties"]

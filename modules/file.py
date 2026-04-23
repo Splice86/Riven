@@ -15,6 +15,8 @@ Provides file editing capabilities with:
 Session ID is automatically available via get_session_id().
 """
 
+import ast
+import difflib
 import os
 import subprocess
 import tempfile
@@ -212,6 +214,45 @@ def _verify_write(path: str, expected_content: str) -> bool:
         return actual_content == expected_content
     except Exception:
         return False
+
+
+def _sanitize_content(content: str) -> str:
+    """Sanitize content to handle encoding edge cases.
+
+    Surrogate characters (U+D800-U+DFFF) can cause issues when
+    writing UTF-8 encoded files. This function replaces them with
+    the Unicode replacement character (U+FFFD).
+
+    Args:
+        content: Raw file content as read by Python
+
+    Returns:
+        Sanitized content safe for UTF-8 encoding
+    """
+    try:
+        # Try to encode as UTF-8 with surrogatepass, then decode
+        return content.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        # Fallback: replace any remaining surrogates with replacement char
+        return content.replace('\ud800', '\ufffd').replace('\udfff', '\ufffd')
+
+
+def _validate_python(content: str) -> tuple[bool, str | None]:
+    """Validate Python syntax using AST parsing.
+
+    Args:
+        content: Python source code to validate
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is None if valid.
+    """
+    try:
+        ast.parse(content)
+        return True, None
+    except SyntaxError as e:
+        lineno = e.lineno or "?"
+        offset = e.offset or "?"
+        return False, f"Syntax error at line {lineno}, column {offset}: {e.msg}"
 
 
 def _count_tokens(text: str) -> int:
@@ -454,15 +495,19 @@ async def replace_text(
     path: str,
     old_text: str,
     new_text: str,
-    threshold: float = 0.95
+    threshold: float = 0.95,
+    validate_syntax: bool = True
 ) -> str:
     """Replace text in a file using fuzzy matching (auto-saves).
+    
+    Uses atomic writes, syntax validation for Python files, and write verification.
     
     Args:
         path: Path to the file
         old_text: Text to find and replace
         new_text: Replacement text
         threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default 0.95)
+        validate_syntax: Whether to validate Python syntax after replacement (default: True)
         
     Returns:
         Confirmation message or error with best match info
@@ -473,6 +518,8 @@ async def replace_text(
     try:
         with open(abs_path, 'r') as f:
             content = f.read()
+        # Sanitize content for UTF-8 encoding edge cases
+        content = _sanitize_content(content)
         lines = content.splitlines(keepends=True)
     except Exception as e:
         return f"Error reading {abs_path}: {e}"
@@ -510,11 +557,21 @@ async def replace_text(
     lines[start:end] = new_lines
     new_content = ''.join(lines)
     
+    # Validate Python syntax for .py files
+    if validate_syntax and abs_path.endswith('.py'):
+        is_valid, syntax_error = _validate_python(new_content)
+        if not is_valid:
+            return f"Error: Replacement would introduce syntax error: {syntax_error}"
+    
+    # Use atomic write to prevent partial writes
     try:
-        with open(abs_path, 'w') as f:
-            f.write(new_content)
+        _atomic_write(abs_path, new_content)
     except Exception as e:
         return f"Error saving {abs_path}: {e}"
+    
+    # Verify the write succeeded
+    if not _verify_write(abs_path, new_content):
+        return f"Replaced lines {start+1}-{end} but verification failed (content may differ)"
     
     return f"Replaced lines {start+1}-{end} (fuzzy match {score:.0%})"
 
@@ -565,7 +622,7 @@ async def diff_text(
     new_text: str,
     threshold: float = 0.95
 ) -> str:
-    """Show the before/after of a proposed replacement without modifying.
+    """Show the unified diff of a proposed replacement without modifying.
     
     Args:
         path: Path to the file
@@ -574,7 +631,7 @@ async def diff_text(
         threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default 0.95)
         
     Returns:
-        Formatted before/after diff
+        Unified diff output showing the proposed change
     """
     path = os.path.expanduser(path)
     abs_path = os.path.abspath(path)
@@ -582,6 +639,7 @@ async def diff_text(
     try:
         with open(abs_path, 'r') as f:
             content = f.read()
+        content = _sanitize_content(content)
         lines = content.splitlines(keepends=True)
     except Exception as e:
         return f"Error reading {abs_path}: {e}"
@@ -601,17 +659,264 @@ async def diff_text(
         return f"Cannot diff — text not found in {os.path.basename(abs_path)}."
     
     start, end = span
-    before = ''.join(lines[start:end]).rstrip()
+    before_lines = lines[start:end]
     
     new_lines = new_text.splitlines(keepends=True)
     if new_lines and not new_lines[-1].endswith('\n'):
         new_lines[-1] += '\n'
-    after = ''.join(new_lines).rstrip()
+    after_lines = new_lines
     
     filename = os.path.basename(abs_path)
+    
+    # Generate unified diff
+    diff = ''.join(difflib.unified_diff(
+        before_lines,
+        after_lines,
+        fromfile=f"a/{filename}",
+        tofile=f"b/{filename}",
+        lineterm='\n'
+    ))
+    
     return (
         f"=== diff: {filename} lines {start+1}-{end} (match {score:.0%}) ===\n"
-        f"\n--- BEFORE ---:\n{before}\n\n--- AFTER ---:\n{after}"
+        f"\n--- unified diff ---\n{diff}"
+    )
+
+
+def _generate_unified_diff(
+    path: str,
+    old_lines: list[str],
+    new_lines: list[str],
+    context: int = 3
+) -> str:
+    """Generate a unified diff between old and new content.
+    
+    Args:
+        path: File path for the diff header
+        old_lines: Original lines
+        new_lines: New lines
+        context: Number of context lines around changes
+        
+    Returns:
+        Unified diff string
+    """
+    return ''.join(difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{os.path.basename(path)}",
+        tofile=f"b/{os.path.basename(path)}",
+        n=context,
+        lineterm='\n'
+    ))
+
+
+async def batch_edit(
+    path: str,
+    replacements: list[Replacement],
+    threshold: float = 0.95
+) -> EditResult:
+    """Apply multiple replacements in a single atomic operation.
+    
+    More efficient than calling replace_text() multiple times as it only
+    reads and writes the file once. All replacements must succeed for the
+    file to be modified.
+    
+    Args:
+        path: Path to the file
+        replacements: List of Replacement dataclasses (old_str, new_str)
+        threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default 0.95)
+        
+    Returns:
+        EditResult with success status, diff, and match info
+    """
+    path = os.path.expanduser(path)
+    abs_path = os.path.abspath(path)
+    
+    try:
+        with open(abs_path, 'r') as f:
+            content = f.read()
+        content = _sanitize_content(content)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Error reading {abs_path}: {e}"
+        )
+    
+    original_lines = content.splitlines(keepends=True)
+    working_content = content
+    
+    # Apply each replacement
+    changes: list[tuple[int, int, float]] = []
+    
+    for rep in replacements:
+        lines = working_content.splitlines(keepends=True)
+        span, score = _find_best_window(lines, rep.old_str, threshold=threshold)
+        
+        if not span:
+            # Find best match even below threshold
+            best_span, best_score = _find_best_window(lines, rep.old_str, threshold=0.0)
+            if best_span:
+                start, end = best_span
+                matched_text = ''.join(lines[start:end]).strip()[:100]
+                return EditResult(
+                    success=False,
+                    path=abs_path,
+                    message=f"No match for: {rep.old_str[:50]}... (best: {best_score:.0%})",
+                    similarity=best_score
+                )
+            return EditResult(
+                success=False,
+                path=abs_path,
+                message=f"Text not found: {rep.old_str[:50]}..."
+            )
+        
+        start, end = span
+        changes.append((start, end, score))
+        
+        new_lines = rep.new_str.splitlines(keepends=True)
+        if new_lines and not new_lines[-1].endswith('\n'):
+            new_lines[-1] += '\n'
+        
+        lines[start:end] = new_lines
+        working_content = ''.join(lines)
+    
+    # Validate Python syntax for .py files
+    syntax_error = None
+    if abs_path.endswith('.py'):
+        is_valid, syntax_error = _validate_python(working_content)
+        if not is_valid:
+            return EditResult(
+                success=False,
+                path=abs_path,
+                message=f"Syntax validation failed",
+                similarity=changes[-1][2] if changes else None,
+                syntax_error=syntax_error
+            )
+    
+    # Generate diff
+    new_lines = working_content.splitlines(keepends=True)
+    diff = _generate_unified_diff(abs_path, original_lines, new_lines)
+    
+    # Atomic write
+    try:
+        _atomic_write(abs_path, working_content)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Failed to write: {e}",
+            similarity=changes[-1][2] if changes else None
+        )
+    
+    # Verify write
+    if not _verify_write(abs_path, working_content):
+        return EditResult(
+            success=True,
+            path=abs_path,
+            message=f"Wrote file but verification failed",
+            changed=True,
+            diff=diff,
+            similarity=changes[-1][2] if changes else None
+        )
+    
+    return EditResult(
+        success=True,
+        path=abs_path,
+        message=f"Applied {len(replacements)} replacement(s)",
+        changed=True,
+        diff=diff,
+        line_start=changes[0][0] + 1 if changes else None,
+        line_end=changes[-1][1] + 1 if changes else None,
+        similarity=changes[-1][2] if changes else None
+    )
+
+
+async def delete_snippet(path: str, snippet: str, threshold: float = 0.95) -> EditResult:
+    """Delete the first occurrence of a snippet from a file.
+    
+    Uses atomic write and returns a structured EditResult.
+    
+    Args:
+        path: Path to the file
+        snippet: Text to find and delete
+        threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default 0.95)
+        
+    Returns:
+        EditResult with success status and diff
+    """
+    path = os.path.expanduser(path)
+    abs_path = os.path.abspath(path)
+    
+    try:
+        with open(abs_path, 'r') as f:
+            content = f.read()
+        content = _sanitize_content(content)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Error reading {abs_path}: {e}"
+        )
+    
+    lines = content.splitlines(keepends=True)
+    span, score = _find_best_window(lines, snippet, threshold=threshold)
+    
+    if not span:
+        best_span, best_score = _find_best_window(lines, snippet, threshold=0.0)
+        if best_span:
+            start, end = best_span
+            matched_text = ''.join(lines[start:end]).strip()[:100]
+            return EditResult(
+                success=False,
+                path=abs_path,
+                message=f"Snippet not found (best: {best_score:.0%})",
+                similarity=best_score
+            )
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message="Snippet not found in file"
+        )
+    
+    start, end = span
+    original_lines = lines[:]
+    del lines[start:end]
+    new_content = ''.join(lines)
+    
+    # Generate diff
+    diff = _generate_unified_diff(abs_path, original_lines, lines)
+    
+    # Atomic write
+    try:
+        _atomic_write(abs_path, new_content)
+    except Exception as e:
+        return EditResult(
+            success=False,
+            path=abs_path,
+            message=f"Failed to write: {e}"
+        )
+    
+    # Verify write
+    if not _verify_write(abs_path, new_content):
+        return EditResult(
+            success=True,
+            path=abs_path,
+            message="Deleted but verification failed",
+            changed=True,
+            diff=diff,
+            similarity=score
+        )
+    
+    return EditResult(
+        success=True,
+        path=abs_path,
+        message="Snippet deleted",
+        changed=True,
+        diff=diff,
+        line_start=start + 1,
+        line_end=end,
+        similarity=score
     )
 
 
@@ -898,7 +1203,7 @@ def get_module():
             ),
             CalledFn(
                 name="replace_text",
-                description="Replace text in an open file using fuzzy matching. Auto-saves the file.\n\nArgs:\n- path: Path to the file\n- old_text: Text to find and replace (fuzzy matched)\n- new_text: Replacement text\n- threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default: 0.95). Lower values allow sloppier matches.",
+                description="Replace text in an open file using fuzzy matching. Auto-saves the file. Validates Python syntax by default.\n\nArgs:\n- path: Path to the file\n- old_text: Text to find and replace (fuzzy matched)\n- new_text: Replacement text\n- threshold: Minimum Jaro-Winkler similarity (0.0-1.0, default: 0.95)\n- validate_syntax: Whether to validate Python syntax after replacement (default: True)",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -917,6 +1222,10 @@ def get_module():
                         "threshold": {
                             "type": "number",
                             "description": "Minimum Jaro-Winkler similarity (0.0-1.0, default: 0.95). Lower to allow matches with whitespace differences."
+                        },
+                        "validate_syntax": {
+                            "type": "boolean",
+                            "description": "Whether to validate Python syntax after replacement (default: True)"
                         }
                     },
                     "required": ["path", "old_text", "new_text"]
@@ -1098,6 +1407,52 @@ def get_module():
                     "required": ["path", "content"]
                 },
                 fn=write_text,
+            ),
+            CalledFn(
+                name="batch_edit",
+                description="Apply multiple text replacements in a single atomic operation. More efficient than calling replace_text() multiple times.\n\nArgs:\n- path: Path to the file\n- replacements: List of {old_str, new_str} pairs\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        },
+                        "replacements": {
+                            "type": "array",
+                            "description": "List of {old_str, new_str} replacement pairs"
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Minimum Jaro-Winkler similarity (0.0-1.0, default: 0.95)"
+                        }
+                    },
+                    "required": ["path", "replacements"]
+                },
+                fn=batch_edit,
+            ),
+            CalledFn(
+                name="delete_snippet",
+                description="Delete the first occurrence of a snippet from a file using fuzzy matching.\n\nArgs:\n- path: Path to the file\n- snippet: Text to find and delete\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file"
+                        },
+                        "snippet": {
+                            "type": "string",
+                            "description": "Text to find and delete"
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "Minimum Jaro-Winkler similarity (0.0-1.0, default: 0.95)"
+                        }
+                    },
+                    "required": ["path", "snippet"]
+                },
+                fn=delete_snippet,
             ),
         ],
         context_fns=[
