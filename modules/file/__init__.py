@@ -196,26 +196,35 @@ def _file_help() -> str:
     """Static tool documentation - does not change between calls."""
     return """## File Tools (Help)
 
-### CRITICAL: File Context Rules
-- Files opened with open_file() are automatically injected into context below.
-- Do NOT re-open a file that is already in context — check list_open_files() first.
-- If a file is already listed in context, read from context directly. Do NOT call open_file() again.
-- Large files (>1200 lines) are automatically truncated. Use open_function() to see specific code.
-- Use close_file() when done with a file to free context space.
+### CRITICAL: Context Budget
+Every file open consumes context space. LLM context windows are finite.
+- Keep 2-4 files open maximum at any time.
+- Close files the moment you no longer need them — do not wait.
+- Open files are listed in context below ({file}). Check list_open_files() before adding more.
+
+### File Lifecycle Rules
+1. **BEFORE opening**: always call list_open_files() first to see what's already in context.
+   If the file you need is already open, read from context — do NOT call open_file() again.
+2. **WHILE working**: if you switch to a new goal or task and the open files are no longer relevant,
+   call close_file() on the old ones before opening new ones.
+3. **AFTER finishing**: when a file's work is done, close it immediately.
+   Do NOT leave files open "just in case." Open them again when needed.
+4. **Large files**: files >1200 lines are truncated in context. Use open_function(path, name)
+   to extract specific classes/functions via AST instead of opening the whole file.
 
 ### Tool Reference
 - **open_file(path, line_start?, line_end?)** - Add file to context (only if not already open!)
-- **open_function(path, name, include_docstring?, include_decorators?)** - Extract specific class/function via AST (use this for large files)
+- **open_function(path, name, include_docstring?, include_decorators?)** - Extract specific class/function via AST (use for large files)
 - **replace_text(path, old_text, new_text, threshold?)** - Fuzzy-match replacement, auto-saves (threshold=0.95)
 - **batch_edit(path, replacements, threshold?)** - Multiple replacements in one atomic pass
 - **delete_snippet(path, snippet, threshold?)** - Remove a snippet, auto-saves
 - **write_text(path, content, create_parent_dirs?)** - Write content, creates file if needed
 - **delete_file(path)** - Delete a file
-- **close_file(name)** - Close a file from context (frees context space)
+- **close_file(name)** - Close a file from context (frees context space) — USE THIS PROACTIVELY
 - **close_all_files()** - Close all open files
 - **preview_replace(path, old_text, threshold?)** - Preview match location only
 - **diff_text(path, old_text, new_text, threshold?)** - Show diff without modifying
-- **list_open_files()** - List all files currently in context (always check this first!)
+- **list_open_files()** - List all files currently in context (ALWAYS call this first!)
 - **get_file_history(path?)** - Get file change history
 - **search_files(pattern, path?)** - Grep pattern in files
 - **list_dir(path?)** - List directory contents
@@ -224,10 +233,10 @@ def _file_help() -> str:
 - **chdir(path)** - Change directory
 
 ### Workflow
-1. Before opening a file: call list_open_files() to see what's already in context
-2. For specific functions/classes in large files: use open_function(path, name)
-3. When done with a file: call close_file() to manage context size
-4. Use search_files() to find code before opening files"""
+1. Call list_open_files() to see current context
+2. Use search_files() to find code before opening files
+3. open_file() only files you will actively edit/read in the next few steps
+4. As soon as you finish a task or switch goals, close_file() the now-irrelevant files"""
 
 
 def file_context() -> str:

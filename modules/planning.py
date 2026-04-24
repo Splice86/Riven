@@ -262,16 +262,42 @@ def _planning_help() -> str:
     """Static tool documentation."""
     return """## Planning (Help)
 
-Use goals to track what you're working on. Goals can have files linked so you know what to have open.
+Goals are your **planning system**. Use them to organize software work before, during, and after coding.
 
-### Workflow
-1. **create_goal(title, description?, priority?, files?)** - Create a new goal
-2. **add_file_to_goal(goal_id, file_path)** - Link a file to a goal
-3. **list_goals(status?)** - List all goals (active, paused, complete)
-4. **get_goal(goal_id)** - See goal details and linked files
-5. **update_goal_status(goal_id, status)** - Change status (active/paused/complete)
-6. **close_goal(goal_id)** - Mark goal complete
-7. **remove_file_from_goal(goal_id, file_path)** - Unlink a file
+### How to Use Goals for Software Work
+
+**BEFORE writing any code — create a goal:**
+When given a task, immediately create a goal describing what needs to be done.
+This forces you to break the work into a concrete plan.
+
+**Link files to goals — this IS the plan:**
+The `files` parameter in create_goal() and add_file_to_goal() is your todo list.
+These are the exact files you need to open and edit to complete the goal.
+Before starting work on a goal, open its linked files. After finishing, close them.
+
+**During work:**
+- Reference the goal's linked files as your roadmap.
+- As you discover additional files needed, add them with add_file_to_goal().
+- When you finish a chunk of work, close the files you no longer need.
+
+**After completing work:**
+Call close_goal() to mark it complete. This removes it from the active goals list.
+
+### Example Workflow
+1. Task: "add user auth to the API"
+2. Call create_goal(title="Add user authentication", description="...", files=["api.py", "auth.py"])
+3. Call get_goal(goal_id) to see the plan — opens relevant files first
+4. Edit api.py and auth.py
+5. Call close_goal(goal_id) when done
+
+### Tool Reference
+- **create_goal(title, description?, priority?, files?)** - Create goal BEFORE coding (planning step)
+- **add_file_to_goal(goal_id, file_path)** - Add a file to an existing goal's plan
+- **list_goals(status?)** - List all goals (active, paused, complete)
+- **get_goal(goal_id)** - See goal details and its file list (your plan for that goal)
+- **update_goal_status(goal_id, status)** - Change status: active, paused, or complete
+- **close_goal(goal_id)** - Mark goal complete (after all work is done)
+- **remove_file_from_goal(goal_id, file_path)** - Remove a file from a goal's plan
 
 ### Priority Levels
 critical > high > medium > low
@@ -279,18 +305,26 @@ critical > high > medium > low
 ### Notes
 - Goals are session-scoped (private to this session)
 - Files are stored as absolute paths
-- Use goals to decide which files should be open via {file}"""
+- Active goals and their linked files appear in context below ({planning})
+- Goals are the source of truth for what files should be open — if a file is not on any active goal's list, consider closing it"""
 
 
 def _planning_context() -> str:
-    """Dynamic context - active goals with files. Changes when goals are created/updated."""
+    """Dynamic context - active goals with files. Changes when goals are created/updated.
+    
+    This context shows the current work plan. The linked files are what you should
+    have open. If open files are NOT on any active goal's list, close them.
+    """
     session_id = get_session_id()
     goals = _search_goals(status="active", limit=10)
     
     if not goals:
-        return "No active goals"
+        return "No active goals. Create one with create_goal() before starting work."
     
-    lines = ["=== Active Goals ==="]
+    lines = ["=== Active Goals (your work plan) ==="]
+    lines.append("\nOpen the linked files for each goal before working on it.")
+    lines.append("Close files that are not on any goal's file list.\n")
+    
     for goal in goals:
         props = goal.get("properties", {})
         title = props.get("title", "Untitled")
@@ -300,11 +334,11 @@ def _planning_context() -> str:
         priority_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(priority, "⚪")
         
         if files:
-            lines.append(f"\n{priority_emoji} #{goal['id']} {title}")
-            for f in files:
-                lines.append(f"   - {os.path.basename(f)}")
+            file_names = ", ".join(os.path.basename(f) for f in files)
+            lines.append(f"{priority_emoji} Goal #{goal['id']}: {title}")
+            lines.append(f"   Files: {file_names}")
         else:
-            lines.append(f"\n{priority_emoji} #{goal['id']} {title} (no files)")
+            lines.append(f"{priority_emoji} Goal #{goal['id']}: {title} (no files — use add_file_to_goal to build the plan)")
     
     return "\n".join(lines)
 

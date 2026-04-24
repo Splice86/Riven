@@ -12,7 +12,7 @@ from typing import Optional
 
 import requests
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -244,6 +244,244 @@ async def send_message(req: MessageRequest):
     except Exception as e:
         _debug(f"API: non-streaming exception: {e}", req.session_id)
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# Process Management API
+# =============================================================================
+
+from process_manager import process_manager, ProcessStatus
+
+
+class ProcessOutputParams:
+    """Query params for /processes/{id}/output endpoint."""
+    messages: bool = True
+    thinking: bool = False
+    tool_calls: bool = False
+    tool_results: bool = False
+    errors: bool = False
+    last_only: bool = False
+
+
+@app.get("/processes")
+def list_processes(
+    shard_name: str = None,
+    status: str = None,
+):
+    """List all processes, optionally filtered."""
+    status_enum = ProcessStatus(status) if status else None
+    procs = process_manager.list(shard_name=shard_name, status=status_enum)
+    
+    return {
+        "processes": [
+            {
+                "process_id": p.process_id,
+                "shard_name": p.shard_name,
+                "status": p.status.value,
+                "created_at": p.created_at.isoformat(),
+                "started_at": p.started_at.isoformat() if p.started_at else None,
+                "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+                "elapsed_seconds": p.elapsed_seconds,
+            }
+            for p in procs
+        ],
+        "count": len(procs),
+    }
+
+
+@app.post("/processes")
+def spawn_process(req: Request):
+    """Spawn a new process."""
+    body = req.json()
+    
+    shard_name = body.get("shard_name")
+    if not shard_name:
+        raise HTTPException(400, "shard_name is required")
+    
+    message = body.get("message")
+    process_id = body.get("process_id")
+    llm_config = body.get("llm_config", "primary")
+    
+    proc = process_manager.spawn(
+        shard_name=shard_name,
+        message=message,
+        process_id=process_id,
+        llm_config=llm_config,
+    )
+    
+    return {
+        "process_id": proc.process_id,
+        "shard_name": proc.shard_name,
+        "status": proc.status.value,
+        "created_at": proc.created_at.isoformat(),
+    }
+
+
+@app.get("/processes/{process_id}")
+def get_process(process_id: str):
+    """Get process status and info."""
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    return {
+        "process_id": proc.process_id,
+        "shard_name": proc.shard_name,
+        "status": proc.status.value,
+        "created_at": proc.created_at.isoformat(),
+        "started_at": proc.started_at.isoformat() if proc.started_at else None,
+        "completed_at": proc.completed_at.isoformat() if proc.completed_at else None,
+        "elapsed_seconds": proc.elapsed_seconds,
+        "is_done": proc.is_done,
+        "is_running": proc.is_running,
+    }
+
+
+@app.get("/processes/{process_id}/output")
+def get_process_output(
+    process_id: str,
+    messages: bool = True,
+    thinking: bool = False,
+    tool_calls: bool = False,
+    tool_results: bool = False,
+    errors: bool = False,
+    last_only: bool = False,
+    since: float = None,
+):
+    """Get process output with filtering.
+    
+    Query params:
+        messages: Include token output (default: true)
+        thinking: Include reasoning content (default: false)
+        tool_calls: Include function call events (default: false)
+        tool_results: Include function result events (default: false)
+        errors: Include error events (default: false)
+        last_only: Only return events since last poll (default: false)
+        since: Only return events after this timestamp
+    """
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    output = proc.get_output(
+        messages=messages,
+        thinking=thinking,
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        errors=errors,
+        last_only=last_only,
+        since=since,
+    )
+    
+    return {
+        "process_id": proc.process_id,
+        "status": proc.status.value,
+        "output": output,
+        "last_poll": proc._last_poll,
+    }
+
+
+@app.get("/processes/{process_id}/output/stream")
+async def stream_process_output(
+    process_id: str,
+    messages: bool = True,
+    thinking: bool = False,
+    tool_calls: bool = False,
+    tool_results: bool = False,
+    errors: bool = False,
+):
+    """Stream process output as SSE.
+    
+    Query params same as /output but no last_only/since (continuous stream).
+    """
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    async def event_generator():
+        seen_indices = set()
+        while not proc.is_done:
+            events = proc.get_output(
+                messages=messages,
+                thinking=thinking,
+                tool_calls=tool_calls,
+                tool_results=tool_results,
+                errors=errors,
+            )
+            
+            # Yield only new events
+            for i, event in enumerate(events):
+                if i >= len(seen_indices):
+                    yield {"event": "output", "data": json.dumps(event)}
+                    seen_indices.add(i)
+            
+            # Also yield status updates
+            yield {"event": "status", "data": json.dumps({"status": proc.status.value})}
+            
+            await asyncio.sleep(0.1)
+        
+        # Final done event
+        yield {"event": "done", "data": json.dumps({"status": proc.status.value})}
+    
+    async def sse_wrapper():
+        # Use streaming response
+        from starlette.responses import StreamingResponse
+        async def generate():
+            async for event in event_generator():
+                yield f"event: {event['event']}\ndata: {event['data']}\n\n"
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    
+    return await sse_wrapper()
+
+
+@app.post("/processes/{process_id}/input")
+def send_process_message(process_id: str, req: Request):
+    """Send a message to a process.
+    
+    Only works if process is in idle state (waiting for input after context_rebuilt).
+    """
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    if proc.status != ProcessStatus.IDLE:
+        raise HTTPException(409, f"Process is {proc.status.value}, not idle")
+    
+    body = req.json()
+    message = body.get("message")
+    if not message:
+        raise HTTPException(400, "message is required")
+    
+    success = process_manager.send_message(process_id, message)
+    if not success:
+        raise HTTPException(500, "Failed to queue message")
+    
+    return {"status": "ok", "message": "Message queued"}
+
+
+@app.delete("/processes/{process_id}")
+def stop_process(process_id: str):
+    """Stop a running process."""
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    process_manager.stop(process_id)
+    return {"status": "ok", "process_id": process_id, "status": ProcessStatus.STOPPED.value}
+
+
+@app.delete("/processes/{process_id}/cleanup")
+def cleanup_process(process_id: str):
+    """Remove a done/stopped process."""
+    proc = process_manager.get(process_id)
+    if not proc:
+        raise HTTPException(404, f"Process '{process_id}' not found")
+    
+    if not proc.is_done:
+        raise HTTPException(409, f"Process is {proc.status.value}, not done")
+    
+    process_manager.remove(process_id)
+    return {"status": "ok", "process_id": process_id}
 
 
 # =============================================================================
