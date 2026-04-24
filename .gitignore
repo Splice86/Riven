@@ -110,6 +110,10 @@ venv.bak/
 context_debug/
 context_logs/
 
+# Secrets — DO NOT COMMIT
+secrets.yaml
+secrets_template.yaml
+
 # OS files
 .DS_Store
 Thumbs.db
