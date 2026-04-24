@@ -23,8 +23,10 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -278,6 +280,46 @@ class Core:
             except Exception as e:
                 logger.warning(f"Failed to store assistant message to memory: {e}")
 
+    def _save_llm_context(self, api_messages: list[dict], session_id: str) -> None:
+        """Save the full LLM request context to a timestamped file.
+        
+        Saves to debug_dir as JSON with metadata. Useful for tracing and debugging
+        what was actually sent to the LLM.
+        """
+        debug_dir = get('debug_dir', 'context_logs')
+        if not debug_dir:
+            return
+        
+        # Create debug dir if it doesn't exist
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+        except OSError:
+            return
+        
+        # Build timestamped filename: YYYY-MM-DD_HH-MM-SS_<session>.json
+        now = datetime.now(timezone.utc)
+        ts = now.strftime('%Y-%m-%d_%H-%M-%S')
+        # Truncate session_id for filename (first 16 chars)
+        sid = session_id[:16] if session_id else 'nosession'
+        filename = f"{ts}_{sid}.json"
+        filepath = os.path.join(debug_dir, filename)
+        
+        # Build payload with metadata
+        payload = {
+            "saved_at": now.isoformat(),
+            "session_id": session_id,
+            "model": self._llm_model,
+            "num_messages": len(api_messages),
+            "messages": api_messages,
+        }
+        
+        try:
+            with open(filepath, 'w') as f:
+                json.dump(payload, f, indent=2)
+            _debug(f"LLM context saved to {filepath}", session_id)
+        except OSError as e:
+            logger.warning(f"Failed to save LLM context: {e}")
+
     async def run_stream(self, session_id: str) -> AsyncIterator[dict]:
         _debug("→ run_stream ENTRY", session_id)
         """Run the agent loop for ONE turn.
@@ -362,6 +404,9 @@ class Core:
 
             # Sanitize messages for LLM API
             api_messages = self._ctx.sanitize_messages_for_llm(api_messages)
+            
+            # --- Save LLM request context snapshot ---
+            self._save_llm_context(api_messages, session_id)
             
             # --- Call LLM ---
             _debug("run_stream: calling LLM (streaming)", session_id)
