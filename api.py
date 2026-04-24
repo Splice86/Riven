@@ -7,6 +7,7 @@ The API is stateless; all conversation history lives in the Memory API.
 import glob
 import json
 import os
+import time
 from typing import Optional
 
 import requests
@@ -17,6 +18,17 @@ from pydantic import BaseModel
 
 from core import Core
 from config import get_llm_config, get
+
+# High-level debug flag
+DEBUG_HANG = True
+
+def _debug(step: str, session_id: str = None) -> None:
+    """Print timestamped debug messages to trace execution flow."""
+    if not DEBUG_HANG:
+        return
+    ts = time.time()
+    sid = f"[{session_id[:8]}]" if session_id else "[--------]"
+    print(f"[DEBUG {ts:.3f}] {sid} {step}", flush=True)
 
 
 # =============================================================================
@@ -126,40 +138,48 @@ async def send_message(req: MessageRequest):
     """
     shard = _load_shard(req.shard_name)
     llm = get_llm_config("primary")
+    _debug(f"API: received message, shard={req.shard_name}", req.session_id)
 
     core = Core(shard=shard, llm=llm)
 
     # Store user message to Memory API first
     memory_url = get("memory_api.url")
+    _debug("API: storing user message to memory API", req.session_id)
 
     try:
         r = requests.post(
             f"{memory_url}/context",
             json={"role": "user", "content": req.message, "session": req.session_id},
         )
+        _debug("API: user message stored to memory API", req.session_id)
     except requests.RequestException as e:
+        _debug(f"API: memory API error: {e}", req.session_id)
         raise HTTPException(500, f"Memory API error: {e}")
 
     if req.stream:
         async def generate():
+            _debug("API: starting streaming response", req.session_id)
             try:
                 # Harness controls the loop - calls run_stream() for each LLM turn
                 turn_count = 0
                 while True:
                     turn_count += 1
+                    _debug(f"API: starting turn {turn_count}", req.session_id)
                     
                     # Use a generator variable to ensure proper cleanup
                     generator = core.run_stream(req.session_id)
                     async for event in generator:
                         # Handle errors
                         if "error" in event:
+                            _debug(f"API: received error event: {event['error'][:100]}", req.session_id)
                             yield f"data: {json.dumps({'error': event['error']})}\n\n"
                             # Ensure generator is cleaned up
                             await generator.aclose()
-                            break
+                            return  # Stop streaming on error - don't loop forever!
 
                         # Handle tool_call events - forward as-is
                         if "tool_call" in event:
+                            _debug(f"API: tool_call: {event['tool_call']['name']}", req.session_id)
                             yield f"data: {json.dumps(event)}\n\n"
 
                         # Handle thinking events
@@ -170,6 +190,7 @@ async def send_message(req: MessageRequest):
 
                         # Handle tool results - forward as-is
                         elif "tool_result" in event:
+                            _debug(f"API: tool_result: {event['tool_result']['name']}", req.session_id)
                             yield f"data: {json.dumps(event)}\n\n"
 
                         # Regular token
@@ -178,25 +199,32 @@ async def send_message(req: MessageRequest):
 
                         # Context rebuilt - properly cleanup and loop for next turn
                         if event.get("context_rebuilt"):
+                            _debug(f"API: context_rebuilt, turn {turn_count} complete", req.session_id)
                             # Ensure generator cleanup before next turn
                             await generator.aclose()
                             break
 
                         # Done
                         if event.get("done"):
+                            _debug("API: done, streaming complete", req.session_id)
                             yield f"data: {json.dumps({'done': True})}\n\n"
                             await generator.aclose()
                             return
 
             except Exception as e:
+                _debug(f"API: streaming exception: {e}", req.session_id)
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     # Non-streaming mode - harness controls the loop
+    _debug("API: non-streaming mode", req.session_id)
     try:
         output = ""
+        turn_count = 0
         while True:
+            turn_count += 1
+            _debug(f"API: non-streaming turn {turn_count}", req.session_id)
             async for event in core.run_stream(req.session_id):
                 if "error" in event:
                     raise Exception(event["error"])
@@ -205,11 +233,14 @@ async def send_message(req: MessageRequest):
                 if event.get("done"):
                     return {"output": output}
                 if event.get("context_rebuilt"):
+                    _debug(f"API: context_rebuilt, turn {turn_count} done", req.session_id)
                     break  # exit inner loop, continue outer while True
 
+        _debug("API: non-streaming complete", req.session_id)
         return {"output": output}
 
     except Exception as e:
+        _debug(f"API: non-streaming exception: {e}", req.session_id)
         raise HTTPException(500, str(e))
 
 

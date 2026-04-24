@@ -10,10 +10,22 @@ It knows nothing about LLM calls, tool execution, or the agent loop.
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 
 import requests
 from config import get
+
+# High-level debug flag
+DEBUG_HANG = True
+
+def _debug(step: str, session_id: str = None) -> None:
+    """Print timestamped debug messages to trace execution flow."""
+    if not DEBUG_HANG:
+        return
+    ts = time.time()
+    sid = f"[{session_id[:8]}]" if session_id else "[--------]"
+    print(f"[DEBUG {ts:.3f}] {sid} {step}", flush=True)
 
 
 # =============================================================================
@@ -89,10 +101,12 @@ class MemoryClient:
             payload["tool_call_id"] = tool_call_id
         if function:
             payload["function"] = function
+        _debug(f"MEMORY: add_context({role}, {len(content)} chars)", session)
         resp = requests.post(
             f"{self.base_url}/context",
             json=payload
         )
+        _debug(f"MEMORY: add_context done", session)
         resp.raise_for_status()
         return resp.json()
     
@@ -105,10 +119,12 @@ class MemoryClient:
             session: Session ID
         """
         session = session or self.session_id
+        _debug(f"MEMORY: get_context(limit={limit}, max_summaries={max_summaries})", session)
         resp = requests.get(
             f"{self.base_url}/context",
             params={"limit": limit, "max_summaries": max_summaries, "session": session}
         )
+        _debug(f"MEMORY: get_context done", session)
         resp.raise_for_status()
         return resp.json().get("context", [])
     

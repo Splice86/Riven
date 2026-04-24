@@ -23,6 +23,7 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Callable, AsyncIterator
 
@@ -32,6 +33,17 @@ from config import get
 from modules import registry, Module, CalledFn, ContextFn, _session_id
 
 logger = logging.getLogger(__name__)
+
+# High-level debug flag - set to True to enable trace prints
+DEBUG_HANG = True
+
+def _debug(step: str, session_id: str = None) -> None:
+    """Print timestamped debug messages to trace execution flow."""
+    if not DEBUG_HANG:
+        return
+    ts = time.time()
+    sid = f"[{session_id[:8]}]" if session_id else "[--------]"
+    print(f"[DEBUG {ts:.3f}] {sid} {step}", flush=True)
 
 
 # =============================================================================
@@ -267,6 +279,7 @@ class Core:
                 logger.warning(f"Failed to store assistant message to memory: {e}")
 
     async def run_stream(self, session_id: str) -> AsyncIterator[dict]:
+        _debug("→ run_stream ENTRY", session_id)
         """Run the agent loop for ONE turn.
         
         This method processes a single LLM call and returns. After tool execution,
@@ -290,6 +303,7 @@ class Core:
         import requests
         
         self._cancelled = False
+        _debug("run_stream: starting turn", session_id)
 
         # Memory client for this session
         memory = self._ctx.memory_client
@@ -315,11 +329,14 @@ class Core:
             context_error = None
             context_limit = get('context.limit', 20)
             context_max_summaries = get('context.max_summaries', 3)
+            _debug("run_stream: fetching history from memory API", session_id)
             try:
                 history = memory.get_context(limit=context_limit, max_summaries=context_max_summaries, session=session_id)
+                _debug(f"run_stream: history received ({len(history)} messages)", session_id)
             except requests.exceptions.ConnectionError as e:
                 context_error = str(e)
                 history = []
+                _debug(f"run_stream: Memory API connection failed: {context_error}", session_id)
                 error_msg = f"Memory API connection failed: {context_error}. Ensure memory-api is running at {memory_url or 'http://localhost:8030'}."
                 try:
                     memory.add_context("tool", error_msg, session=session_id)
@@ -330,6 +347,7 @@ class Core:
             except Exception as e:
                 context_error = str(e)
                 history = []
+                _debug(f"run_stream: Memory API error: {context_error}", session_id)
                 error_msg = f"Memory API error: {context_error}"
                 try:
                     memory.add_context("tool", error_msg, session=session_id)
@@ -338,6 +356,7 @@ class Core:
                 yield {"error": error_msg}
                 return
 
+            _debug("run_stream: preparing messages for LLM", session_id)
             # Build messages for LLM (system prompt + processed history)
             api_messages, system = self._ctx.prepare_messages_for_llm(
                 history, self._system_template, registry
@@ -347,6 +366,7 @@ class Core:
             api_messages = self._ctx.sanitize_messages_for_llm(api_messages)
             
             # --- Call LLM ---
+            _debug("run_stream: calling LLM (streaming)", session_id)
             try:
                 stream = await self._client.chat.completions.create(
                     model=self._llm_model,
@@ -356,6 +376,7 @@ class Core:
                 )
             except Exception as e:
                 error_msg = f"LLM call failed: {type(e).__name__}: {e}. Session={session_id}"
+                _debug(f"run_stream: LLM call failed: {error_msg}", session_id)
                 try:
                     memory.add_context("tool", error_msg, session=session_id)
                 except Exception:
@@ -365,6 +386,7 @@ class Core:
 
             # --- Collect the complete assistant message ---
             assistant_msg = {"tool_calls": []}
+            _debug("run_stream: waiting for LLM stream chunks", session_id)
 
             async for chunk in stream:
                 if self._cancelled:
@@ -405,20 +427,24 @@ class Core:
                             if func_data.get('arguments'):
                                 tc["function"]["arguments"] += func_data['arguments']
 
+            _debug("run_stream: LLM stream complete", session_id)
             # --- Parse calls ---
             calls = self._parse_calls(assistant_msg)
 
             # --- No tool calls — done ---
             if not calls:
+                _debug("run_stream: no tool calls, done", session_id)
                 assistant_msg["role"] = "assistant"
                 if assistant_msg.get("content", "").strip():
                     self._store_assistant(memory, assistant_msg, session_id)
                     safe_msg = _json_safe(assistant_msg)
                     yield {"assistant": safe_msg}
                 yield {"done": True}
+                _debug("run_stream: ← EXIT (done)", session_id)
                 return
 
             # --- Store assistant message BEFORE executing tools ---
+            _debug(f"run_stream: executing {len(calls)} tool call(s): {[c.name for c in calls]}", session_id)
             assistant_msg["role"] = "assistant"
             self._store_assistant(memory, assistant_msg, session_id)
 
@@ -450,6 +476,7 @@ class Core:
                 }}
                 
                 result = await self._execute(call, func_index)
+                _debug(f"run_stream: tool '{call.name}' executed, error={result.error}", session_id)
                 results.append(result)
 
                 result_content = result.content if not result.error else f"ERROR: {result.error}"
@@ -461,6 +488,7 @@ class Core:
                 }}
 
                 # Store tool result to memory API
+                _debug(f"run_stream: storing tool result to memory API", session_id)
                 try:
                     memory.add_context(
                         "tool",
@@ -471,6 +499,7 @@ class Core:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store tool result to memory: {e}")
+                _debug("run_stream: tool result stored", session_id)
 
             # --- Yield assistant message ---
             safe_assistant_msg = _json_safe(assistant_msg)
@@ -478,6 +507,7 @@ class Core:
 
             # Signal that context was rebuilt and control returns to harness
             yield {"context_rebuilt": True}
+            _debug("run_stream: ← EXIT (context_rebuilt)", session_id)
 
         finally:
             try:

@@ -20,10 +20,21 @@ import signal
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 
 from modules import CalledFn, ContextFn, Module
 from config import get
+
+# High-level debug flag
+DEBUG_HANG = True
+
+def _debug(step: str) -> None:
+    """Print timestamped debug messages to trace execution flow."""
+    if not DEBUG_HANG:
+        return
+    ts = time.time()
+    print(f"[DEBUG {ts:.3f}] SHELL: {step}", flush=True)
 
 
 DEFAULT_TIMEOUT = get('tool_timeout', 60.0)
@@ -72,6 +83,7 @@ async def run(
     timeout: float = None,
     cwd: str = None,
 ) -> str:
+    _debug(f"run() ENTRY: command='{command}' timeout={timeout}")
     """Execute a shell command with proper process group handling.
     
     On timeout: sends SIGTERM, waits 5s, then SIGKILL if still running.
@@ -94,6 +106,7 @@ async def run(
     start_time = asyncio.get_event_loop().time()
     
     try:
+        _debug(f"run(): creating subprocess")
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
@@ -103,10 +116,12 @@ async def run(
         )
         
         try:
+            _debug(f"run(): waiting for process to complete (timeout={timeout}s)")
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(),
                 timeout=timeout,
             )
+            _debug(f"run(): process completed")
             exit_code = proc.returncode
             execution_time = asyncio.get_event_loop().time() - start_time
             
@@ -114,6 +129,7 @@ async def run(
             stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ""
             
         except asyncio.TimeoutError:
+            _debug(f"run(): TIMEOUT after {timeout}s")
             # Kill process group on timeout
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -139,6 +155,7 @@ async def run(
             return _format_result(result)
     
     except Exception as e:
+        _debug(f"run(): exception: {e}")
         execution_time = asyncio.get_event_loop().time() - start_time
         
         result = ShellResult(
@@ -160,6 +177,7 @@ async def run(
         execution_time=execution_time,
     )
     
+    _debug(f"run() EXIT: exit_code={exit_code}")
     return _format_result(result)
 
 
