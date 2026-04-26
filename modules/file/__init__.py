@@ -137,6 +137,15 @@ async def open_function(
     return await _file_editor.open_function(path, name, include_docstring, include_decorators)
 
 
+async def init_git_for_file(path: str) -> str:
+    """Initialize git tracking for a file to enable safe rollback.
+
+    Run this when open_file fails with a git-tracking warning.
+    It will git init (if needed), git add, and git commit the file.
+    """
+    return await _file_editor.init_git_for_file(path)
+
+
 async def preview_replace(path: str, old_text: str, threshold: float = 0.95) -> str:
     """Preview where a replacement would match."""
     return await _file_editor.preview_replace(path, old_text, threshold)
