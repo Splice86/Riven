@@ -48,6 +48,17 @@ from modules.file.code_parser import (
     _extract_definition_source,
 )
 
+from modules.file.git import (
+    init_git_for_file,
+    _run_git,
+    _is_git_repo,
+    _is_git_tracked,
+    _get_git_hash,
+    _git_status,
+    _git_status_summary,
+    _git_warning,
+)
+
 from modules.file.memory import (
     format_file_history,
     get_file_history,
@@ -137,13 +148,9 @@ async def open_function(
     return await _file_editor.open_function(path, name, include_docstring, include_decorators)
 
 
-async def init_git_for_file(path: str) -> str:
-    """Initialize git tracking for a file to enable safe rollback.
-
-    Run this when open_file fails with a git-tracking warning.
-    It will git init (if needed), git add, and git commit the file.
-    """
-    return await _file_editor.init_git_for_file(path)
+async def restore_from_git(path: str) -> str:
+    """Restore a file to its last committed state in git."""
+    return await _file_editor.restore_from_git(path)
 
 
 async def preview_replace(path: str, old_text: str, threshold: float = 0.95) -> str:
@@ -213,7 +220,10 @@ Every file open consumes context space. LLM context windows are finite.
 
 ### File Lifecycle Rules
 1. **BEFORE opening**: always call list_open_files() first to see what's already in context.
-   If the file you need is already open, read from context — do NOT call open_file() again.
+   - If the file is already open, read from context — do NOT call open_file() again.
+   - If the file is open with a partial range and you need the full file, close it first,
+     then open it without line bounds. If it's already open with a wide range
+     (e.g. lines 0-to-end or lines 0-1200+), just work with what's there — no need to re-open.
 2. **WHILE working**: if you switch to a new goal or task and the open files are no longer relevant,
    call close_file() on the old ones before opening new ones.
 3. **AFTER finishing**: when a file's work is done, close it immediately.
@@ -222,30 +232,56 @@ Every file open consumes context space. LLM context windows are finite.
    to extract specific classes/functions via AST instead of opening the whole file.
 
 ### Tool Reference
-- **open_file(path, line_start?, line_end?)** - Add file to context (only if not already open!)
-- **open_function(path, name, include_docstring?, include_decorators?)** - Extract specific class/function via AST (use for large files)
-- **replace_text(path, old_text, new_text, threshold?)** - Fuzzy-match replacement, auto-saves (threshold=0.95)
-- **batch_edit(path, replacements, threshold?)** - Multiple replacements in one atomic pass
-- **delete_snippet(path, snippet, threshold?)** - Remove a snippet, auto-saves
-- **write_text(path, content, create_parent_dirs?)** - Write content, creates file if needed
-- **delete_file(path)** - Delete a file
-- **close_file(name)** - Close a file from context (frees context space) — USE THIS PROACTIVELY
-- **close_all_files()** - Close all open files
-- **preview_replace(path, old_text, threshold?)** - Preview match location only
-- **diff_text(path, old_text, new_text, threshold?)** - Show diff without modifying
-- **list_open_files()** - List all files currently in context (ALWAYS call this first!)
-- **get_file_history(path?)** - Get file change history
-- **search_files(pattern, path?)** - Grep pattern in files
-- **list_dir(path?)** - List directory contents
-- **file_info(path)** - Get file info
-- **pwd()** - Show current directory
-- **chdir(path)** - Change directory
+
+**Opening & Closing:**
+- **open_file(path, line_start?, line_end?)** — Add file to context (only if not already open!).
+  line_start is 0-indexed. Omit line_end to read to end of file.
+  IMPORTANT: If open_file fails with a git-tracking warning, call init_git_for_file(path) first.
+- **open_function(path, name, include_docstring?, include_decorators?)** — Extract a specific
+  class/function using AST. Only works on .py files. Replaces the file's context entry with the
+  function's definition. If name not found, returns a list of available definitions.
+- **close_file(name)** — Close a file from context (frees context space). USE PROACTIVELY.
+- **close_all_files()** — Close all open files.
+- **list_open_files()** — List all files currently in context. ALWAYS call this before opening.
+
+**Editing:**
+- **replace_text(path, old_text, new_text, threshold?)** — Fuzzy-match replacement, auto-saves.
+  threshold is Jaro-Winkler similarity (0.0-1.0, default: 0.95). Set validate_syntax=False for
+  non-Python files or intentionally broken code.
+- **batch_edit(path, replacements, threshold?)** — Multiple replacements applied atomically.
+  "Atomic" means: all replacements are computed against the ORIGINAL file, then applied together.
+  If any single replacement fails, NO changes are made (full rollback). This prevents
+  cascading failures when edits depend on each other's line positions.
+  Replacements is a list of {old_str, new_str} objects.
+- **delete_snippet(path, snippet, threshold?)** — Remove a snippet, auto-saves.
+- **write_text(path, content, create_parent_dirs?)** — Write content to file, creates if needed.
+- **delete_file(path)** — Delete a file.
+
+**Preview & Diff:**
+- **preview_replace(path, old_text, threshold?)** — Show where a replacement would match, no changes.
+- **diff_text(path, old_text, new_text, threshold?)** — Show before/after diff, no changes.
+
+**Navigation & Info:**
+- **search_files(pattern, path?)** — Grep pattern in files. pattern is a regex. path defaults to ".".
+- **list_dir(path?)** — List directory contents. path defaults to current directory.
+- **file_info(path)** — Get file metadata (size, line count, type).
+- **pwd()** — Show current working directory.
+- **chdir(path)** — Change working directory.
+- **get_file_history(path?)** — Get file change history for this session.
+
+**Git Integration:**
+- **init_git_for_file(path)** — Initialize git tracking for a file. Runs git init (if needed),
+  git add, and git commit. Call this when open_file fails with a git-tracking warning.
+- **restore_from_git(path)** — Restore file to its last committed state in git.
+  Requires the file to already be git-tracked. Use this to undo unwanted changes.
 
 ### Workflow
-1. Call list_open_files() to see current context
-2. Use search_files() to find code before opening files
-3. open_file() only files you will actively edit/read in the next few steps
-4. As soon as you finish a task or switch goals, close_file() the now-irrelevant files"""
+1. Call list_open_files() to see what's in context
+2. Use search_files() to locate code before opening
+3. If open_file() fails with a git-tracking warning, call init_git_for_file() first
+4. open_file() only files you will actively edit/read in the next few steps
+5. For large Python files, prefer open_function() over open_file() with wide line ranges
+6. As soon as you finish a task or switch goals, close_file() the now-irrelevant files"""
 
 
 def file_context() -> str:
@@ -374,6 +410,18 @@ def get_module() -> Module:
                     "required": ["path"]
                 },
                 fn=init_git_for_file,
+            ),
+            CalledFn(
+                name="restore_from_git",
+                description="Restore a file to its last committed state in git.\\n\\nUse this to undo changes and roll back to the last committed version.\\n\\nArgs:\\n- path: Path to the file to restore",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to the file to restore"}
+                    },
+                    "required": ["path"]
+                },
+                fn=restore_from_git,
             ),
             CalledFn(
                 name="replace_text",
@@ -600,6 +648,7 @@ __all__ = [
     "write_text",
     "delete_file",
     "open_function",
+    "restore_from_git",
     "preview_replace",
     "diff_text",
     "search_files",
@@ -627,4 +676,12 @@ __all__ = [
     "get_open_files",
     "hash_content",
     "track_file_change",
+    # Git helpers
+    "_run_git",
+    "_is_git_repo",
+    "_is_git_tracked",
+    "_get_git_hash",
+    "_git_status",
+    "_git_warning",
+    "_git_status_summary",
 ]
