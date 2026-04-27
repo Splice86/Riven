@@ -6,8 +6,10 @@ The API is stateless; all conversation history lives in the Memory API.
 
 import asyncio
 import glob
+import importlib
 import json
 import os
+import pkgutil
 import time
 from typing import Optional
 
@@ -516,6 +518,69 @@ def cleanup_process(process_id: str):
     
     process_manager.remove(process_id)
     return {"status": "ok", "process_id": process_id}
+
+
+# =============================================================================
+# Module Routes
+# =============================================================================
+
+def _discover_modules():
+    """Scan modules/ directory and discover all subpackages with register_routes."""
+    modules_dir = os.path.join(os.path.dirname(__file__), "modules")
+    if not os.path.isdir(modules_dir):
+        return []
+
+    discovered = []
+    for name in sorted(os.listdir(modules_dir)):
+        mod_path = os.path.join(modules_dir, name)
+        if not os.path.isdir(mod_path):
+            continue
+        if name.startswith("_"):
+            continue
+        if not os.path.exists(os.path.join(mod_path, "__init__.py")):
+            continue
+
+        try:
+            mod = importlib.import_module(f"modules.{name}")
+            if hasattr(mod, "register_routes"):
+                discovered.append(name)
+                print(f"[INFO] Auto-registering routes from modules.{name}")
+        except Exception as e:
+            print(f"[WARNING] Could not load modules.{name}: {e}")
+
+    return discovered
+
+
+def _register_module_routes(app, module_name: str):
+    """Import and register routes from a single module."""
+    try:
+        mod = importlib.import_module(f"modules.{module_name}")
+        mod.register_routes(app)
+        return True
+    except Exception as e:
+        print(f"[WARNING] modules.{module_name}.register_routes failed: {e}")
+        return False
+
+
+# Discover and register all module routes at startup
+_registered_modules = _discover_modules()
+for name in _registered_modules:
+    _register_module_routes(app, name)
+
+
+@app.get("/module/")
+def list_modules():
+    """List all modules that have registered API routes."""
+    return {
+        "modules": [
+            {
+                "name": name,
+                "path": f"/module/{name}",
+            }
+            for name in _registered_modules
+        ],
+        "count": len(_registered_modules),
+    }
 
 
 # =============================================================================
