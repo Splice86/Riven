@@ -1,0 +1,151 @@
+"""In-memory registry for screen state.
+
+Screens are ephemeral — tied to the current Riven session.
+No DB persistence. State lives here as long as the server is running.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from typing import Optional
+
+from fastapi import WebSocket
+
+from . import constants as C
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ScreenConnection:
+    __slots__ = (
+        "uid",
+        "ws",
+        "bound_path",
+        "bound_section",
+        "bound_version",
+        "capacity_lines",
+        "client_name",
+    )
+
+    def __init__(
+        self,
+        uid: str,
+        ws: WebSocket,
+        bound_path: str = "",
+        bound_section: str = "",
+        bound_version: int = 0,
+        capacity_lines: int = 30,
+        client_name: str = "Screen",
+    ):
+        self.uid = uid
+        self.ws = ws
+        self.bound_path = bound_path
+        self.bound_section = bound_section
+        self.bound_version = bound_version
+        self.capacity_lines = capacity_lines
+        self.client_name = client_name
+
+    def to_dict(self) -> dict:
+        return {
+            "uid": self.uid,
+            "bound_path": self.bound_path,
+            "bound_section": self.bound_section,
+            "bound_version": self.bound_version,
+            "capacity_lines": self.capacity_lines,
+            "client_name": self.client_name,
+        }
+
+
+class ScreenRegistry:
+    _connections: dict[str, ScreenConnection] = {}
+    _lock = asyncio.Lock()
+    _version: dict[str, int] = {}  # path -> edit version counter
+
+    async def connect(self, screen: ScreenConnection) -> None:
+        async with self._lock:
+            self._connections[screen.uid] = screen
+        logger.info(f"[Screens] Connected: uid={screen.uid} client={screen.client_name}")
+
+    async def disconnect(self, uid: str) -> None:
+        async with self._lock:
+            self._connections.pop(uid, None)
+        logger.info(f"[Screens] Disconnected: uid={uid}")
+
+    async def get(self, uid: str) -> Optional[ScreenConnection]:
+        async with self._lock:
+            return self._connections.get(uid)
+
+    async def get_by_path(self, path: str) -> list[ScreenConnection]:
+        """Find all screens bound to a path.
+
+        Path is normalized before comparison to handle relative vs absolute
+        path variants (e.g. './foo.py' vs '/abs/foo.py').
+        """
+        abs_path = os.path.abspath(path)
+        async with self._lock:
+            return [s for s in self._connections.values() if s.bound_path == abs_path]
+
+    async def list_all(self) -> list[ScreenConnection]:
+        async with self._lock:
+            return list(self._connections.values())
+
+
+
+    async def bind(
+        self,
+        uid: str,
+        path: str,
+        section: str | None = None,
+    ) -> bool:
+        async with self._lock:
+            screen = self._connections.get(uid)
+            if not screen:
+                return False
+
+            # Always store normalized absolute path to avoid mismatches
+            # when comparing paths passed as relative vs absolute
+            abs_path = os.path.abspath(path)
+            screen.bound_path = abs_path
+            screen.bound_section = section or ""
+            # Increment version atomically
+            current = self._version.get(abs_path, 0)
+            self._version[abs_path] = current + 1
+            screen.bound_version = current + 1
+
+        logger.info(f"[Screens] Bound: uid={uid} path={abs_path} section={section}")
+        return True
+
+    async def release(self, uid: str) -> bool:
+        async with self._lock:
+            screen = await self._resolve(uid)
+            if not screen:
+                return False
+            screen.bound_path = ""
+            screen.bound_section = ""
+            screen.bound_version = 0
+
+        logger.info(f"[Screens] Released: uid={uid}")
+        return True
+
+    async def touch(self, uid: str) -> bool:
+        """Update a screen's last-seen (keepalive)."""
+        async with self._lock:
+            screen = await self._resolve(uid)
+            return screen is not None
+
+    async def get_version(self, path: str) -> int:
+        async with self._lock:
+            return self._version.get(os.path.abspath(path), 0)
+
+    async def bump_version(self, path: str) -> int:
+        async with self._lock:
+            abs_path = os.path.abspath(path)
+            current = self._version.get(abs_path, 0)
+            self._version[abs_path] = current + 1
+            return current + 1
+
+
+registry = ScreenRegistry()

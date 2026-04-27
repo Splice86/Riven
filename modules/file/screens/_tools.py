@@ -7,6 +7,7 @@ via the registry — no DB needed.
 from __future__ import annotations
 
 import logging
+import os
 
 from . import _broadcaster as bc
 from ._registry import registry
