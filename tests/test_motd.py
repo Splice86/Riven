@@ -3,6 +3,7 @@
 Uses FastAPI TestClient to test the API endpoints directly.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 from modules.motd import get_module, register_routes, storage
 from api import app
@@ -123,21 +124,24 @@ class TestMotdTool:
         storage._messages.clear()
         storage._next_id = 1
 
-    def test_post_motd_basic(self):
+    @pytest.mark.asyncio
+    async def test_post_motd_basic(self):
         """post_motd() returns a confirmation with ID and preview."""
         from modules.motd.tools import post_motd
-        result = post_motd("Deploy v2.1 today!")
+        result = await post_motd("Deploy v2.1 today!")
         assert "#1" in result
         assert "Deploy v2.1 today!" in result
 
-    def test_post_motd_with_author(self):
+    @pytest.mark.asyncio
+    async def test_post_motd_with_author(self):
         """post_motd() includes author in output."""
         from modules.motd.tools import post_motd
-        result = post_motd("Weekly deploy", author="riven")
+        result = await post_motd("Weekly deploy", author="riven")
         assert "by riven" in result
 
-    def test_post_motd_empty_rejected(self):
+    @pytest.mark.asyncio
+    async def test_post_motd_empty_rejected(self):
         """post_motd() rejects empty message."""
         from modules.motd.tools import post_motd
-        result = post_motd("")
+        result = await post_motd("")
         assert "empty" in result.lower()

@@ -2,24 +2,19 @@
 
 Riven can post messages that remote screens can subscribe to via /module/motd/.
 
-Tools:
-  - post_motd(message, author=None) — post a new message
-
 Endpoints:
   - GET  /module/motd/        — list all messages
   - POST /module/motd/        — post a new message
   - GET  /module/motd/latest  — get most recent message
+
+Tool:
+  - post_motd(message, author=None) — async, broadcast to /module/motd/
 """
 
-import datetime
-
+from .tools import get_module, post_motd, _motd_help, _motd_latest
 from .storage import storage
-from .tools import get_module as _get_module_tools
 
-
-def get_module():
-    """Return the MOTD module definition for Riven's module registry."""
-    return _get_module_tools()
+__all__ = ["get_module", "register_routes", "post_motd", "storage"]
 
 
 def register_routes(app):
