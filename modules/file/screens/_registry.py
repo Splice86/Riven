@@ -24,9 +24,7 @@ class ScreenConnection:
         "uid",
         "ws",
         "bound_path",
-        "bound_section",
         "bound_version",
-        "capacity_lines",
         "client_name",
     )
 
@@ -35,26 +33,20 @@ class ScreenConnection:
         uid: str,
         ws: WebSocket,
         bound_path: str = "",
-        bound_section: str = "",
         bound_version: int = 0,
-        capacity_lines: int = 30,
         client_name: str = "Screen",
     ):
         self.uid = uid
         self.ws = ws
         self.bound_path = bound_path
-        self.bound_section = bound_section
         self.bound_version = bound_version
-        self.capacity_lines = capacity_lines
         self.client_name = client_name
 
     def to_dict(self) -> dict:
         return {
             "uid": self.uid,
             "bound_path": self.bound_path,
-            "bound_section": self.bound_section,
             "bound_version": self.bound_version,
-            "capacity_lines": self.capacity_lines,
             "client_name": self.client_name,
         }
 
@@ -92,13 +84,17 @@ class ScreenRegistry:
         async with self._lock:
             return list(self._connections.values())
 
+    def _resolve(self, uid: str) -> Optional[ScreenConnection]:
+        """Resolve a screen by UID without acquiring the lock.
 
+        Used internally by methods that already hold the lock.
+        """
+        return self._connections.get(uid)
 
     async def bind(
         self,
         uid: str,
         path: str,
-        section: str | None = None,
     ) -> bool:
         async with self._lock:
             screen = self._connections.get(uid)
@@ -109,22 +105,20 @@ class ScreenRegistry:
             # when comparing paths passed as relative vs absolute
             abs_path = os.path.abspath(path)
             screen.bound_path = abs_path
-            screen.bound_section = section or ""
             # Increment version atomically
             current = self._version.get(abs_path, 0)
             self._version[abs_path] = current + 1
             screen.bound_version = current + 1
 
-        logger.info(f"[Screens] Bound: uid={uid} path={abs_path} section={section}")
+        logger.info(f"[Screens] Bound: uid={uid} path={abs_path}")
         return True
 
     async def release(self, uid: str) -> bool:
         async with self._lock:
-            screen = await self._resolve(uid)
+            screen = self._resolve(uid)
             if not screen:
                 return False
             screen.bound_path = ""
-            screen.bound_section = ""
             screen.bound_version = 0
 
         logger.info(f"[Screens] Released: uid={uid}")
@@ -133,7 +127,7 @@ class ScreenRegistry:
     async def touch(self, uid: str) -> bool:
         """Update a screen's last-seen (keepalive)."""
         async with self._lock:
-            screen = await self._resolve(uid)
+            screen = self._resolve(uid)
             return screen is not None
 
     async def get_version(self, path: str) -> int:

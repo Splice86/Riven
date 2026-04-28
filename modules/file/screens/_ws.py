@@ -90,7 +90,6 @@ async def screen_stream(ws: WebSocket):
             if msg_type == "register":
                 # First message: client identifies itself
                 uid = msg.get("uid", "")
-                capacity = int(msg.get("capacity_lines", 30))
                 client_name = msg.get("client_name", "Screen")
 
                 if not uid:
@@ -100,7 +99,6 @@ async def screen_stream(ws: WebSocket):
                 screen = ScreenConnection(
                     uid=uid,
                     ws=ws,
-                    capacity_lines=capacity,
                     client_name=client_name,
                 )
 
@@ -114,7 +112,6 @@ async def screen_stream(ws: WebSocket):
                     "type": "registered",
                     "uid": uid,
                     "bound_path": screen.bound_path or "",
-                    "bound_section": screen.bound_section or None,
                     "bound_version": screen.bound_version,
                 }))
 
@@ -156,16 +153,14 @@ async def screen_stream(ws: WebSocket):
                 # Screens can also self-bind via WS (alternative to screen_bind tool)
                 if screen:
                     path = msg.get("path", "")
-                    section = msg.get("section", "")
                     try:
-                        ok = await registry.bind(screen.uid, path, section)
+                        ok = await registry.bind(screen.uid, path)
                         if ok:
                             # Re-fetch screen so bound_* fields are up to date
                             screen = await registry.get(screen.uid)
                             await ws.send_text(json.dumps({
                                 "type": "bound",
                                 "path": path,
-                                "section": section,
                                 "version": screen.bound_version,
                             }))
                             # Push content immediately so screen doesn't need a refresh

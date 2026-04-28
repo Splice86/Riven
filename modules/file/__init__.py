@@ -71,7 +71,6 @@ from modules.file.memory import (
 from modules.file.screens import (
     screen_list,
     screen_bind,
-    screen_bind_section,
     screen_release,
     screen_status,
     broadcast_edit,
@@ -183,13 +182,13 @@ async def close_all_files() -> str:
 
 async def replace_text(
     path: str,
-    old_text: str,
-    new_text: str,
+    old: str,
+    new: str,
     threshold: float = 0.95,
     validate_syntax: bool = True
 ) -> str:
     """Replace text in a file using fuzzy matching."""
-    return await _file_editor.replace_text(path, old_text, new_text, threshold, validate_syntax)
+    return await _file_editor.replace_text(path, old, new, threshold, validate_syntax)
 
 
 async def batch_edit(
@@ -204,7 +203,7 @@ async def batch_edit(
         if isinstance(r, Replacement):
             reps.append(r)
         else:
-            reps.append(Replacement(old_str=r["old_str"], new_str=r["new_str"]))
+            reps.append(Replacement(old_str=r["old"], new_str=r["new"]))
     return await _file_editor.batch_edit(path, reps, threshold, validate_syntax)
 
 
@@ -238,14 +237,14 @@ async def restore_from_git(path: str) -> str:
     return await _file_editor.restore_from_git(path)
 
 
-async def preview_replace(path: str, old_text: str, threshold: float = 0.95) -> str:
+async def preview_replace(path: str, old: str, threshold: float = 0.95) -> str:
     """Preview where a replacement would match."""
-    return await _file_editor.preview_replace(path, old_text, threshold)
+    return await _file_editor.preview_replace(path, old, threshold)
 
 
-async def diff_text(path: str, old_text: str, new_text: str, threshold: float = 0.95) -> str:
+async def diff_text(path: str, old: str, new: str, threshold: float = 0.95) -> str:
     """Show diff of a proposed replacement."""
-    return await _file_editor.diff_text(path, old_text, new_text, threshold)
+    return await _file_editor.diff_text(path, old, new, threshold)
 
 
 async def search_files(pattern: str, path: str = ".") -> str:
@@ -338,21 +337,21 @@ Every file open consumes context space. LLM context windows are finite.
 - **list_open_files()** — List all files currently in context. ALWAYS call this before opening.
 
 **Editing:**
-- **replace_text(path, old_text, new_text, threshold?)** — Fuzzy-match replacement, auto-saves.
+- **replace_text(path, old, new, threshold?)** — Fuzzy-match replacement, auto-saves.
   threshold is Jaro-Winkler similarity (0.0-1.0, default: 0.95). Set validate_syntax=False for
   non-Python files or intentionally broken code.
 - **batch_edit(path, replacements, threshold?)** — Multiple replacements applied atomically.
   "Atomic" means: all replacements are computed against the ORIGINAL file, then applied together.
   If any single replacement fails, NO changes are made (full rollback). This prevents
   cascading failures when edits depend on each other's line positions.
-  Replacements is a list of {old_str, new_str} objects.
+  Replacements is a list of {old, new} objects.
 - **delete_snippet(path, snippet, threshold?)** — Remove a snippet, auto-saves.
 - **write_text(path, content, create_parent_dirs?)** — Write content to file, creates if needed.
 - **delete_file(path)** — Delete a file.
 
 **Preview & Diff:**
-- **preview_replace(path, old_text, threshold?)** — Show where a replacement would match, no changes.
-- **diff_text(path, old_text, new_text, threshold?)** — Show before/after diff, no changes.
+- **preview_replace(path, old, threshold?)** — Show where a replacement would match, no changes.
+- **diff_text(path, old, new, threshold?)** — Show before/after diff, no changes.
 
 **Navigation & Info:**
 - **search_files(pattern, path?)** — Grep pattern in files. pattern is a regex. path defaults to ".".
@@ -380,8 +379,7 @@ Every file open consumes context space. LLM context windows are finite.
 Screens are remote clients (e.g., a workshop monitor) that show a live view of the file
 being edited. Bind screens to files to broadcast edits in real-time:
 - **screen_list()** — See all registered screens for this session
-- **screen_bind(path, screen_uid, section?)** — Bind a screen to a file (full snapshot + live diffs)
-- **screen_bind_section(path, screen_uid, start, end)** — Bind to a specific line range
+- **screen_bind(path, screen_uid)** — Bind a screen to a file (full snapshot + live diffs)
 - **screen_release(screen_uid)** — Stop broadcasts for a screen
 - **screen_status(screen_uid)** — Check detailed screen state
 
@@ -531,27 +529,27 @@ def get_module() -> Module:
             ),
             CalledFn(
                 name="replace_text",
-                description="Replace text in an open file using fuzzy matching. Auto-saves the file.\n\nArgs:\n- path: Path to the file\n- old_text: Text to find and replace\n- new_text: Replacement text\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
+                description="Replace text in an open file using fuzzy matching. Auto-saves the file.\n\nArgs:\n- path: Path to the file\n- old: Text to find and replace\n- new: Replacement text\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
                 parameters={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Path to the file"},
-                        "old_text": {"type": "string", "description": "Text to find and replace"},
-                        "new_text": {"type": "string", "description": "Replacement text"},
+                        "old": {"type": "string", "description": "Text to find and replace"},
+                        "new": {"type": "string", "description": "Replacement text"},
                         "threshold": {"type": "number", "description": "Minimum similarity (0.0-1.0, default: 0.95)"}
                     },
-                    "required": ["path", "old_text", "new_text"]
+                    "required": ["path", "old", "new"]
                 },
                 fn=replace_text,
             ),
             CalledFn(
                 name="batch_edit",
-                description="Apply multiple replacements in a single atomic operation.\n\nArgs:\n- path: Path to the file\n- replacements: List of {old_str, new_str} objects\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
+                description="Apply multiple replacements in a single atomic operation.\n\nArgs:\n- path: Path to the file\n- replacements: List of {old, new} objects\n- threshold: Minimum Jaro-Winkler similarity (default: 0.95)",
                 parameters={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Path to the file"},
-                        "replacements": {"type": "array", "description": "List of {old_str, new_str} objects"},
+                        "replacements": {"type": "array", "description": "List of {old, new} objects"},
                         "threshold": {"type": "number", "description": "Minimum similarity (default: 0.95)"}
                     },
                     "required": ["path", "replacements"]
@@ -619,30 +617,30 @@ def get_module() -> Module:
             ),
             CalledFn(
                 name="preview_replace",
-                description="Preview where a replacement would match without modifying.\n\nArgs:\n- path: Path to the file\n- old_text: Text to find\n- threshold: Minimum similarity (default: 0.95)",
+                description="Preview where a replacement would match without modifying.\n\nArgs:\n- path: Path to the file\n- old: Text to find\n- threshold: Minimum similarity (default: 0.95)",
                 parameters={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Path to the file"},
-                        "old_text": {"type": "string", "description": "Text to find"},
+                        "old": {"type": "string", "description": "Text to find"},
                         "threshold": {"type": "number", "description": "Minimum similarity (default: 0.95)"}
                     },
-                    "required": ["path", "old_text"]
+                    "required": ["path", "old"]
                 },
                 fn=preview_replace,
             ),
             CalledFn(
                 name="diff_text",
-                description="Show diff of a proposed replacement without modifying.\n\nArgs:\n- path: Path to the file\n- old_text: Text to find\n- new_text: Proposed replacement\n- threshold: Minimum similarity (default: 0.95)",
+                description="Show diff of a proposed replacement without modifying.\n\nArgs:\n- path: Path to the file\n- old: Text to find\n- new: Proposed replacement\n- threshold: Minimum similarity (default: 0.95)",
                 parameters={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Path to the file"},
-                        "old_text": {"type": "string", "description": "Text to find"},
-                        "new_text": {"type": "string", "description": "Proposed replacement"},
+                        "old": {"type": "string", "description": "Text to find"},
+                        "new": {"type": "string", "description": "Proposed replacement"},
                         "threshold": {"type": "number", "description": "Minimum similarity (default: 0.95)"}
                     },
-                    "required": ["path", "old_text", "new_text"]
+                    "required": ["path", "old", "new"]
                 },
                 fn=diff_text,
             ),
@@ -736,21 +734,6 @@ def get_module() -> Module:
                     "required": ["path", "screen_uid"]
                 },
                 fn=screen_bind,
-            ),
-            CalledFn(
-                name="screen_bind_section",
-                description="Bind a screen to a specific line range of a file.\n\nArgs:\n- path: Path to the file\n- screen_uid: UID of the screen to bind\n- start: Start line (0-indexed)\n- end: End line (exclusive)",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Path to the file"},
-                        "screen_uid": {"type": "string", "description": "Screen UID"},
-                        "start": {"type": "integer", "description": "Start line (0-indexed)"},
-                        "end": {"type": "integer", "description": "End line (exclusive)"}
-                    },
-                    "required": ["path", "screen_uid", "start", "end"]
-                },
-                fn=screen_bind_section,
             ),
             CalledFn(
                 name="screen_release",
@@ -852,7 +835,6 @@ __all__ = [
     # Screen broadcast functions
     "screen_list",
     "screen_bind",
-    "screen_bind_section",
     "screen_release",
     "screen_status",
     "broadcast_edit",

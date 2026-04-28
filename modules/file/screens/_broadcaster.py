@@ -33,7 +33,7 @@ def _build_message(msg_type: str, **kwargs) -> str:
     return json.dumps({"type": msg_type, **kwargs}, ensure_ascii=False)
 
 
-def _build_snapshot(path: str, version: int, section: str | None, capacity: int) -> Optional[dict]:
+def _build_snapshot(path: str, version: int) -> Optional[dict]:
     """Build a full snapshot message for a file.
 
     Always reads from disk so every snapshot reflects the current state.
@@ -42,13 +42,11 @@ def _build_snapshot(path: str, version: int, section: str | None, capacity: int)
     if snap is None:
         return None
 
-    lines = snap.slice(section=section, capacity=capacity)
+    lines = snap.slice()
     return {
         "path": path,
         "version": version,
         "total_lines": len(snap.lines),
-        "section": section,
-        "showing": len(lines),
         "lines": lines,
     }
 
@@ -113,8 +111,6 @@ async def send_snapshot(screen: ScreenConnection) -> bool:
     payload = _build_snapshot(
         path=path,
         version=screen.bound_version,
-        section=screen.bound_section or None,
-        capacity=screen.capacity_lines,
     )
 
     if payload is None:
@@ -195,13 +191,6 @@ async def broadcast_edit(path: str, uids: list[str]) -> tuple[int, int]:
     # Compute diff
     diff = snapshots.compute_diff(path, old_version=old_version, new_version=new_version)
 
-    # Update in-memory versions for targeted screens
-    async with registry._lock:
-        for uid in uids:
-            screen = registry._connections.get(uid)
-            if screen and screen.bound_path == path:
-                screen.bound_version = new_version
-
     if diff is None:
         logger.warning(f"[Screens] broadcast_edit: could not load file {path}")
         return 0, 0
@@ -210,12 +199,13 @@ async def broadcast_edit(path: str, uids: list[str]) -> tuple[int, int]:
         # No actual changes (might be a save without modifications)
         return 0, 0
 
-    # Send diff to screens matching the UIDs list
-    screens = []
+    # Collect screens under a single lock to avoid race with disconnect
     async with registry._lock:
+        screens = []
         for uid in uids:
             screen = registry._connections.get(uid)
             if screen and screen.bound_path == path:
+                screen.bound_version = new_version
                 screens.append(screen)
 
     msg = _build_message("diff", **_build_diff(diff))
@@ -237,7 +227,6 @@ async def broadcast_bind(screen: ScreenConnection) -> None:
     msg = _build_message(
         "bound",
         path=screen.bound_path,
-        section=screen.bound_section or None,
         version=screen.bound_version,
     )
     await _send(screen.ws, msg)

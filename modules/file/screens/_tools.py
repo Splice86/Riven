@@ -25,9 +25,8 @@ async def screen_list() -> str:
     for s in screens:
         status = "🟢 bound" if s.bound_path else "⚪ idle"
         path_str = s.bound_path or "(not bound)"
-        section_str = f" [{s.bound_section}]" if s.bound_section else ""
         lines.append(f"  {status} [{s.uid}] {s.client_name}")
-        lines.append(f"      bound: {path_str}{section_str}")
+        lines.append(f"      bound: {path_str}")
         lines.append("")
 
     return "\n".join(lines).strip()
@@ -36,7 +35,6 @@ async def screen_list() -> str:
 async def screen_bind(
     path: str,
     screen_uid: str,
-    section: str | None = None,
 ) -> str:
     """Bind a screen to a file, enabling live edit broadcasts."""
     from modules import get_session_id
@@ -47,7 +45,7 @@ async def screen_bind(
     if not screen:
         return f"[ERROR] Screen UID '{screen_uid}' not found. Open a screen page first."
 
-    ok = await registry.bind(screen_uid, path, section)
+    ok = await registry.bind(screen_uid, path)
     if not ok:
         return f"[ERROR] Failed to bind screen {screen_uid}"
 
@@ -65,14 +63,8 @@ async def screen_bind(
         # baseline instead of an empty store
         abs_path = os.path.abspath(path)
         bc.snapshots.update(abs_path, screen.bound_version)
-    if screen:
-        await bc.send_snapshot(screen)
-        # Update the shared SnapshotStore so subsequent diffs use this as the baseline
-        abs_path = os.path.abspath(path)
-        bc.snapshots.update(abs_path, screen.bound_version)
 
-    section_str = f" lines {section}" if section else " full file"
-    return f"Bound screen {screen_uid} → {path}{section_str}"
+    return f"Bound screen {screen_uid} → {path}"
 
 
 async def screen_release(screen_uid: str) -> str:
@@ -97,15 +89,7 @@ async def screen_release(screen_uid: str) -> str:
     return f"Released screen {screen_uid}" + (f" from {was_path}" if was_path else "")
 
 
-async def screen_bind_section(
-    path: str,
-    screen_uid: str,
-    start: int,
-    end: int,
-) -> str:
-    """Bind a screen to a specific line range."""
-    section = f"{start}-{end}"
-    return await screen_bind(path, screen_uid, section=section)
+
 
 
 async def screen_status(screen_uid: str) -> str:
@@ -118,8 +102,6 @@ async def screen_status(screen_uid: str) -> str:
         f"Screen: {screen.client_name} [{screen.uid}]",
         f"  Status: {'🟢 bound' if screen.bound_path else '⚪ idle'}",
         f"  Bound path: {screen.bound_path or '(none)'}",
-        f"  Bound section: {screen.bound_section or '(full file)'}",
         f"  Bound version: {screen.bound_version}",
-        f"  Capacity: {screen.capacity_lines} lines",
     ]
     return "\n".join(lines)

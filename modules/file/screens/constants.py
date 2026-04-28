@@ -10,10 +10,8 @@ Screens are stored as memories in the DB with the following schema:
   Keywords:  ["screen", session_id]           # For session-scoped queries
   Properties:
     - type:             "screen"
-    - capacity_lines:   "30"                  # Max lines the screen can display
     - status:           "idle" | "bound"
     - bound_path:       "src/main.py"         # Absolute or project-relative path
-    - bound_section:    "0-30" | null         # Line range or null for full file
     - bound_version:    "3"                   # Monotonically increasing edit count
     - bound_session:    "session-abc"         # Which Riven session it's bound to
     - last_seen:        "2025-05-29T10:00:00Z"
@@ -45,10 +43,8 @@ DEFAULT_SEARCH_LIMIT = 100
 # =============================================================================
 
 PROP_TYPE = "type"
-PROP_CAPACITY = "capacity_lines"
 PROP_STATUS = "status"
 PROP_BOUND_PATH = "bound_path"
-PROP_BOUND_SECTION = "bound_section"
 PROP_BOUND_VERSION = "bound_version"
 PROP_BOUND_SESSION = "bound_session"
 PROP_LAST_SEEN = "last_seen"

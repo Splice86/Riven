@@ -44,26 +44,13 @@ class FileSnapshot:
         except OSError:
             return None
 
-    def slice(self, section: str | None = None, capacity: int = 30) -> list[str]:
-        """Get a slice of lines, optionally limited by section and capacity.
+    def slice(self) -> list[str]:
+        """Return all lines, stripped of trailing newlines.
 
-        Args:
-            section: e.g., "0-30" or "50-100" or None for full file
-            capacity: Max lines to return
-
-        Returns:
-            List of lines (with newlines stripped)
+        Note: 'section' and 'capacity' params were removed. The full file
+        is always sent — browser scrolling handles navigation.
         """
-        if section:
-            try:
-                start, end = section.split("-")
-                lines = self.lines[int(start):int(end)]
-            except (ValueError, IndexError):
-                lines = self.lines
-        else:
-            lines = self.lines
-
-        return [line.rstrip("\n\r") for line in lines[:capacity]]
+        return [line.rstrip("\n\r") for line in self.lines]
 
 
 def _compute_diff(

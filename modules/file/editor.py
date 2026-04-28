@@ -16,8 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-import jellyfish
-
 from .git import (
     _get_git_hash,
     _git_warning,
@@ -220,7 +218,9 @@ def _find_best_window(
     
     if win_size == 0:
         return None, 0.0
-    
+
+    import jellyfish  # lazily — avoids breaking module discovery when jellyfish isn't installed
+
     # First, try exact substring match
     haystack_text = "".join(haystack_lines)
     if needle in haystack_text:
@@ -288,10 +288,6 @@ def _find_exact_span(
     
     return (start_line, end_line, char_offset, end_char_offset), 1.0
 
-
-# =============================================================================
-# FileEditor Class
-# =============================================================================
 
 # =============================================================================
 # FileEditor Class
@@ -689,8 +685,8 @@ class FileEditor:
     async def replace_text(
         self,
         path: str,
-        old_text: str,
-        new_text: str,
+        old: str,
+        new: str,
         threshold: float = 0.95,
         validate_syntax: bool = True
     ) -> str:
@@ -711,10 +707,10 @@ class FileEditor:
         except Exception as e:
             return f"Error reading {abs_path}: {e}"
         
-        span, score = _find_best_window(lines, old_text, threshold=threshold)
+        span, score = _find_best_window(lines, old, threshold=threshold)
         
         if not span:
-            best_span, best_score = _find_best_window(lines, old_text, threshold=0.0)
+            best_span, best_score = _find_best_window(lines, old, threshold=0.0)
             if best_span:
                 start, end, _, _ = best_span
                 matched_lines = lines[start:end]
@@ -737,8 +733,8 @@ class FileEditor:
             before_part = line[:char_start]
             after_part = line[char_end:]
             
-            # Combine: before + new_text + after
-            new_line = before_part + new_text + after_part
+            # Combine: before + new + after
+            new_line = before_part + new + after_part
             
             # Build new content: before lines + new line + after lines
             before_lines = lines[:start]
@@ -749,7 +745,7 @@ class FileEditor:
             before_lines = lines[:start]
             after_lines = lines[end:]
             
-            new_content_lines = new_text.splitlines(keepends=True)
+            new_content_lines = new.splitlines(keepends=True)
             if new_content_lines and not new_content_lines[-1].endswith('\n'):
                 new_content_lines[-1] += '\n'
             
@@ -1095,7 +1091,7 @@ class FileEditor:
     # Preview/Diff Operations
     # -------------------------------------------------------------------------
     
-    async def preview_replace(self, path: str, old_text: str, threshold: float = 0.95) -> str:
+    async def preview_replace(self, path: str, old: str, threshold: float = 0.95) -> str:
         """Preview where a replacement would match."""
         path = os.path.expanduser(path)
         abs_path = os.path.abspath(path)
@@ -1107,10 +1103,10 @@ class FileEditor:
         except Exception as e:
             return f"Error reading {abs_path}: {e}"
         
-        span, score = _find_best_window(lines, old_text, threshold)
+        span, score = _find_best_window(lines, old, threshold)
         
         if not span:
-            best_span, best_score = _find_best_window(lines, old_text, threshold=0.0)
+            best_span, best_score = _find_best_window(lines, old, threshold=0.0)
             if best_span:
                 start, end, _, _ = best_span
                 matched_text = ''.join(lines[start:end]).strip()
@@ -1128,8 +1124,8 @@ class FileEditor:
     async def diff_text(
         self,
         path: str,
-        old_text: str,
-        new_text: str,
+        old: str,
+        new: str,
         threshold: float = 0.95
     ) -> str:
         """Show diff of a proposed replacement."""
@@ -1143,10 +1139,10 @@ class FileEditor:
         except Exception as e:
             return f"Error reading {abs_path}: {e}"
         
-        span, score = _find_best_window(lines, old_text, threshold)
+        span, score = _find_best_window(lines, old, threshold)
         
         if not span:
-            best_span, best_score = _find_best_window(lines, old_text, threshold=0.0)
+            best_span, best_score = _find_best_window(lines, old, threshold=0.0)
             if best_span:
                 start, end, _, _ = best_span
                 matched_text = ''.join(lines[start:end]).rstrip()
@@ -1159,7 +1155,7 @@ class FileEditor:
         
         start, end, _, _ = span
         before = ''.join(lines[start:end]).rstrip()
-        new_lines = new_text.splitlines(keepends=True)
+        new_lines = new.splitlines(keepends=True)
         if new_lines and not new_lines[-1].endswith('\n'):
             new_lines[-1] += '\n'
         after = ''.join(new_lines).rstrip()

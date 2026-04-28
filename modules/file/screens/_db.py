@@ -8,14 +8,12 @@ remains compatible if anything still calls them. Real state lives in _registry.
 from typing import Optional
 
 
-def register_screen(uid, session_id, capacity_lines=30, client_name="Screen") -> dict:
+def register_screen(uid, session_id, client_name="Screen") -> dict:
     return {
         "memory_id": None,
         "uid": uid,
         "screen_status": "idle",
         "bound_path": None,
-        "bound_section": None,
-        "capacity_lines": capacity_lines,
         "client_name": client_name,
     }
 
@@ -40,7 +38,7 @@ def update_screen(uid: str, **props) -> bool:
     return True
 
 
-def set_screen_bound(uid: str, session_id: str, path: str, section=None, version=1) -> bool:
+def set_screen_bound(uid: str, session_id: str, path: str, version=1) -> bool:
     return True
 
 

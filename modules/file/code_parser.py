@@ -10,7 +10,6 @@ import ast
 from dataclasses import dataclass, field
 from typing import Literal
 
-import jellyfish
 
 
 @dataclass
@@ -231,7 +230,9 @@ def _find_definitions_by_name(
     """
     exact_matches = []
     fuzzy_matches = []
-    
+
+    import jellyfish  # lazily — avoids breaking module discovery when jellyfish isn't installed
+
     for defn in definitions:
         # Check exact match on name and qualified_name
         if defn.name == name or defn.qualified_name == name:

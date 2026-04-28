@@ -155,7 +155,6 @@
   #status-overlay .dot { width: 12px; height: 12px; border-radius: 50%; animation: pulse 1.5s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
   #release-btn {
-    margin-left: auto;
     background: #21262d;
     color: #8b949e;
     border: 1px solid #30363d;
@@ -166,6 +165,16 @@
     transition: all 0.15s;
   }
   #release-btn:hover { background: #f85149; color: #fff; border-color: #f85149; }
+
+  /* ---- Scroll controls ---- */
+
+
+  /* Line highlight flash on new/updated content */
+  @keyframes line-flash {
+    0%   { background: rgba(88, 166, 255, 0.40); }
+    100% { background: transparent; }
+  }
+  .line.flash { animation: line-flash 1.2s ease-out forwards; }
 </style>
 </head>
 <body>
@@ -220,6 +229,7 @@ let currentVersion = 0;
 let lines          = [];       // Current displayed lines
 let uiVersion      = 0;        // Version shown in UI
 
+// ---- Scroll state ----
 // =============================================================================
 // UI helpers
 // =============================================================================
@@ -270,6 +280,51 @@ function setClientName(name) {
 function releaseScreen() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: 'release' }));
+}
+
+// =============================================================================
+// Scroll helpers
+// =============================================================================
+
+function scrollToLine(lineIdx, smooth) {
+  const linesEl   = document.getElementById('lines');
+  const displayEl = document.getElementById('display');
+  if (!linesEl || !displayEl || lineIdx < 0 || lineIdx >= linesEl.children.length) return;
+
+  // Scroll the scrollable ancestor (#display) so the target line lands at the top
+  const targetLine = linesEl.children[lineIdx];
+  const targetTop  = targetLine.offsetTop;
+  displayEl.scrollTo({ top: targetTop, behavior: smooth ? 'smooth' : 'auto' });
+}
+
+function scrollToBottom(smooth) {
+  const el = document.getElementById('display');
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+}
+
+function _computeScrollTarget(sections) {
+  // Walk sections in old-file order. For 'added' sections, section.start is in
+  // NEW file / DOM coords — use it directly. 'removed' sections are skipped
+  // (their start/end are in OLD file coords and don't map to the current DOM).
+  for (const section of sections) {
+    if (section.action === 'added') {
+      return section.start;
+    }
+  }
+  return null;
+}
+
+function _flashLines(targetIdx, count) {
+  const el = document.getElementById('lines');
+  if (!el) return;
+  for (let i = 0; i < count; i++) {
+    const lineEl = el.children[targetIdx + i];
+    if (lineEl) {
+      lineEl.classList.remove('flash');
+      void lineEl.offsetWidth; // force reflow to re-trigger animation
+      lineEl.classList.add('flash');
+    }
+  }
 }
 
 // =============================================================================
@@ -357,13 +412,13 @@ function renderLines(rawLines, action) {
     }
     offset = 0;
     for (const section of rawLines) {
-      const idx = section.start + offset;
       if (section.action === 'added') {
+        // section.start is in new-file coords → insert at that position directly
         for (let i = 0; i < section.lines.length; i++) {
-          lines.splice(idx + i, 0, section.lines[i]);
-          container.insertBefore(makeLineEl(idx + i, section.lines[i], 'added'), container.children[idx + i] || null);
+          const idx = section.start + i;
+          lines.splice(idx, 0, section.lines[i]);
+          container.insertBefore(makeLineEl(idx, section.lines[i], 'added'), container.children[idx] || null);
         }
-        offset += section.lines.length;
       }
     }
     return;
@@ -420,7 +475,6 @@ function connect() {
       type: 'register',
       uid: uid,
       session_id: sessionId,
-      capacity_lines: Math.floor((window.innerHeight - 120) / 19.5),
       client_name: clientName,
     }));
   });
@@ -480,6 +534,13 @@ function connect() {
       currentVersion = msg.new_version || (currentVersion + 1);
       setVersion(currentVersion);
       renderLines(msg.sections, 'added');
+
+      const targetLine = _computeScrollTarget(msg.sections);
+      if (targetLine !== null) {
+        const flashCount = msg.sections.reduce((n, s) => n + (s.end - s.start), 0);
+        _flashLines(targetLine, flashCount);
+        scrollToLine(targetLine, true);
+      }
 
     } else if (type === 'released') {
       currentPath    = '';
