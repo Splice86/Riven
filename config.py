@@ -97,11 +97,11 @@ def find_project_root(from_path: str | None = None) -> str | None:
 
     Discovery order:
       1. RV_PROJECT_ROOT env var (explicit override)
-      2. .riven/ directory (primary — this IS the project root)
-      3. Walk up from from_path checking for .riven/ or .git/
-      4. git rev-parse --show-toplevel (fallback — only if from_path is inside a git repo)
+      2. Walk up inside git repo boundary, looking for .riven/
+      3. Git toplevel as fallback (inside a git repo but no .riven/)
 
-    Returns None if no project found.
+    Never returns a directory above the git toplevel. This prevents
+    a .riven/ at $HOME from shadowing the actual project.
     Result is cached after first call.
     """
     global _project_root_cache
@@ -120,8 +120,15 @@ def find_project_root(from_path: str | None = None) -> str | None:
         _debug(f"find_project_root: env override -> {_project_root_cache[start]!r}")
         return _project_root_cache[start]
 
-    # 2. Walk up looking for .riven/ (riven project takes priority)
-    for directory in _walk_up(start):
+    # 2. Find git toplevel first — this bounds our search.
+    #    We will NOT return a directory above the git root, which prevents
+    #    a .riven/ at $HOME from shadowing the actual project.
+    git_root = _git_toplevel(start)
+
+    # 3. Walk up from start, but stop at git_root (if found).
+    #    Only consider .riven/ inside the current git repo.
+    stop_at = os.path.abspath(git_root) if git_root else None
+    for directory in _walk_up(start, stop_at=stop_at):
         riven_path = os.path.join(directory, RIVEN_DIR)
         _debug(f"find_project_root: checking {riven_path}")
         if os.path.isdir(riven_path):
@@ -129,21 +136,10 @@ def find_project_root(from_path: str | None = None) -> str | None:
             _debug(f"find_project_root: found .riven/ at {directory}")
             return _project_root_cache[start]
 
-    # 3. Walk up looking for .git/ (existing git repo without .riven/)
-    for directory in _walk_up(start):
-        git_path = os.path.join(directory, '.git')
-        _debug(f"find_project_root: checking {git_path}")
-        if os.path.isdir(git_path):
-            _project_root_cache[start] = directory
-            _debug(f"find_project_root: found .git/ at {directory}")
-            return _project_root_cache[start]
-
-    # 4. Git toplevel fallback (only if from_path is inside a git work tree)
-    _debug(f"find_project_root: falling back to _git_toplevel")
-    git_root = _git_toplevel(start)
+    # 4. No .riven/ found — return git toplevel if inside a git repo
     if git_root:
         _project_root_cache[start] = git_root
-        _debug(f"find_project_root: git toplevel -> {git_root}")
+        _debug(f"find_project_root: git toplevel fallback -> {git_root}")
         return _project_root_cache[start]
 
     # Not found
