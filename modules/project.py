@@ -448,25 +448,13 @@ async def remove_file_from_plan(item_id: int, file_path: str) -> str:
 # =============================================================================
 
 def _project_help() -> str:
+    from modules import _tool_ref
     return """## Project (Help)
 
 Every riven project has a **plan** stored in `.riven/project.yaml`. The plan is the
 guide for all programming work — it lives with the project and is versioned with git.
 
-### Project Setup
-- **create_project()** — create a riven project (one-time per project)
-- **get_project_info()** — show project root, git status, plan title
-- **set_project_name(name)** — name the project
-
-### Planning
-- **set_plan_title(title)** — name the plan
-- **add_plan_item(title, content?, files?)** — add a plan item
-- **update_plan_item(item_id, title?, content?, status?, files?)** — edit a plan item
-- **list_plan_items(status?)** — list items (active/complete)
-- **get_plan_item(item_id)** — full item details
-- **close_plan_item(item_id)** — mark item complete
-- **add_file_to_plan(item_id, file_path)** — link a file
-- **remove_file_from_plan(item_id, file_path)** — unlink a file
+""" + _tool_ref('project') + """
 
 ### Workflow
 1. `create_project()` first (one-time)

@@ -114,6 +114,9 @@ context_logs/
 secrets.yaml
 secrets_template.yaml
 
+# Riven project directory (per-project, not committed)
+.riven/
+
 # OS files
 .DS_Store
 Thumbs.db

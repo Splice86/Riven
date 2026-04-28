@@ -87,6 +87,7 @@ system: |
   {memory_help}
   {planning_help}
   {shards_help}
+  {project_help}
 
   --- Dynamic ---
 
@@ -94,7 +95,9 @@ system: |
   {file}
   {shell}
   {shards_context}
+  {project}
 
+  {time_help}
   {time}  # Bottom - always changes
 
 modules:
@@ -105,6 +108,7 @@ modules:
   - web        # {web_help} (static)
   - planning   # {planning_help} (static), {planning} (dynamic)
   - shards     # {shards_help} (static), {shards_context} (dynamic)
+  - project    # {project_help} (static), {project} (dynamic)
 
 tool_timeout: 60
 max_function_calls: 20

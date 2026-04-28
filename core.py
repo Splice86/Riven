@@ -37,7 +37,7 @@ from modules import registry, Module, CalledFn, ContextFn, _session_id
 logger = logging.getLogger(__name__)
 
 # High-level debug flag - set to True to enable trace prints
-DEBUG_HANG = False
+DEBUG_HANG = True  # Enable for lock-up debugging
 
 def _debug(step: str, session_id: str = None) -> None:
     """Print timestamped debug messages to trace execution flow."""
@@ -260,19 +260,20 @@ class Core:
                                   error=f"Unknown function: '{call.name}'. For shell commands, use: run(command='{call.name}')")
 
         timeout = call.arguments.pop("_timeout", None) or self._tool_timeout
+        _exec_start = time.time()
         _debug(f"_execute: calling {func.fn} with timeout={timeout}s args={list(call.arguments.keys())}", session_id)
 
         content, error = "", None
         try:
             result = await asyncio.wait_for(func.fn(**call.arguments), timeout=timeout)
             content = str(result) if result is not None else ""
-            _debug(f"_execute: {call.name} completed OK (content len={len(content)})", session_id)
+            _debug(f"_execute: {call.name} completed OK ({time.time()-_exec_start:.3f}s, content len={len(content)})", session_id)
         except asyncio.TimeoutError:
             error = f"Function timed out after {timeout}s"
             _debug(f"_execute: {call.name} TIMED OUT after {timeout}s", session_id)
         except Exception as e:
             error = str(e)
-            _debug(f"_execute: {call.name} EXCEPTION: {e}", session_id)
+            _debug(f"_execute: {call.name} EXCEPTION ({time.time()-_exec_start:.3f}s): {e}", session_id)
 
         return FunctionResult(call_id=call.id, name=call.name, content=content, error=error)
 
@@ -353,7 +354,8 @@ class Core:
             logger.warning(f"Failed to save LLM context: {e}")
 
     async def run_stream(self, session_id: str) -> AsyncIterator[dict]:
-        _debug("→ run_stream ENTRY", session_id)
+        _rs_start = time.time()
+        _debug(f"→ run_stream ENTRY (total time tracking starts)", session_id)
         """Run the agent loop for ONE turn.
         
         This method processes a single LLM call and returns. After tool execution,
@@ -541,7 +543,7 @@ class Core:
                     safe_msg = _json_safe(assistant_msg)
                     yield {"assistant": safe_msg}
                 yield {"done": True}
-                _debug("run_stream: ← EXIT (done)", session_id)
+                _debug(f"run_stream: ← EXIT (done) total={time.time()-_rs_start:.3f}s", session_id)
                 return
 
             # --- Store assistant message BEFORE executing tools ---
@@ -610,7 +612,7 @@ class Core:
 
             # Signal that context was rebuilt and control returns to harness
             yield {"context_rebuilt": True}
-            _debug("run_stream: ← EXIT (context_rebuilt)", session_id)
+            _debug(f"run_stream: ← EXIT (context_rebuilt) total={time.time()-_rs_start:.3f}s", session_id)
 
         finally:
             try:

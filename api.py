@@ -158,6 +158,7 @@ async def send_message(req: MessageRequest):
         r = requests.post(
             f"{memory_url}/context",
             json={"role": "user", "content": req.message, "session": req.session_id},
+            timeout=30,
         )
         _debug("API: user message stored to memory API", req.session_id)
     except requests.RequestException as e:

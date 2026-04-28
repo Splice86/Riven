@@ -134,4 +134,56 @@ class ModuleRegistry:
 # Global registry
 registry = ModuleRegistry()
 
-__all__ = ['Module', 'CalledFn', 'ContextFn', 'ModuleRegistry', 'registry', '_session_id', 'get_session_id']
+
+def _tool_ref(module_name: str) -> str:
+    """Generate a tool reference section from registered CalledFn objects.
+
+    Cached per module so we only build it once.
+    Safe to call from ContextFn helpers since they run after all modules register.
+    """
+    # Per-module cache so regeneration only happens once per module
+    if not hasattr(_tool_ref, '_cache'):
+        _tool_ref._cache: dict[str, str] = {}
+
+    if module_name in _tool_ref._cache:
+        return _tool_ref._cache[module_name]
+
+    module = registry.get_module(module_name)
+    if not module or not module.called_fns:
+        result = "(no tools registered)"
+    else:
+        lines = []
+        for fn in module.called_fns:
+            # Collapse both escaped \n and real newlines to single space, then take first line
+            collapsed = fn.description.replace('\\n', ' ').replace('\n', ' ')
+            summary = collapsed.strip().split('\n')[0]
+            # Format params concisely
+            params = _format_params(fn.parameters)
+            lines.append(f"- **{fn.name}({params})** — {summary}")
+        result = '\n'.join(lines)
+
+    _tool_ref._cache[module_name] = result
+    return result
+
+
+def _format_params(parameters: dict) -> str:
+    """Format JSON-schema parameters as a short signature string."""
+    props = parameters.get('properties', {})
+    required = set(parameters.get('required', []))
+    all_keys = list(props.keys())
+
+    # Omit internal _timeout from signature display
+    display_keys = [k for k in all_keys if k != '_timeout']
+
+    if not display_keys:
+        return ""
+
+    parts = []
+    for k in display_keys:
+        prefix = "" if k in required else "?"
+        parts.append(f"{prefix}{k}")
+    return ", ".join(parts)
+
+
+__all__ = ['Module', 'CalledFn', 'ContextFn', 'ModuleRegistry', 'registry',
+           '_session_id', 'get_session_id', '_tool_ref', '_format_params']

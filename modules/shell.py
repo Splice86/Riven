@@ -57,15 +57,10 @@ class ShellResult:
 
 def _shell_help() -> str:
     """Static tool documentation - does not change between calls."""
+    from modules import _tool_ref
     return """## Shell (Help)
 
-### Available Commands
-- **run(command, timeout?, cwd?)** - Execute a shell command
-- **run_background(command, cwd?)** - Run in background, returns PID and log path
-- **kill(pid, signal?)** - Send signal to background process (15=SIGTERM, 9=SIGKILL)
-- **cd(path)** - Change working directory
-- **get_cwd()** - Show current directory
-- **which(program)** - Find executable path
+""" + _tool_ref('shell') + """
 
 ### Usage
 Check exit codes. stderr is where the truth lives. Use run_background() for long-running tasks."""

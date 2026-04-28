@@ -294,6 +294,7 @@ async def get_file_history(path: str = None) -> str:
 
 def _file_help() -> str:
     """Static tool documentation - does not change between calls."""
+    from modules import _tool_ref  # Local import to avoid top-level cycle
     return """## File Tools (Help)
 
 ### CRITICAL: Context Budget
@@ -317,54 +318,7 @@ Every file open consumes context space. LLM context windows are finite.
 
 ### Tool Reference
 
-**Opening & Closing:**
-- **open_file(path, line_start?, line_end?, allow_untracked?)** — Add file to context.
-  line_start is 0-indexed. Omit line_end to read to end of file.
-  allow_untracked (default: False) bypasses the git-tracking gate — rollback protection
-  will be disabled for that file. Range validation rules:
-  - If the requested range is a SUBSET of an already-open range, it is REJECTED.
-    Read the file from context instead.
-  - If the requested range SUPERSETS or PARTIALLY OVERLAPS an existing range, the
-    existing entry is expanded to cover the union of both ranges.
-  - If the file is not open yet, it is added normally.
-  IMPORTANT: If open_file fails with a git-tracking warning, call create_project(path) first
-  to initialize a Riven project (which handles git init for you), then open again.
-  Alternatively, re-call with allow_untracked=True to proceed without rollback protection.
-- **open_function(path, name, include_docstring?, include_decorators?)** — Extract a specific
-  class/function using AST. Only works on .py files. Replaces the file's context entry with the
-  function's definition. If name not found, returns a list of available definitions.
-- **close_file(name)** — Close a file from context (frees context space). USE PROACTIVELY.
-- **close_all_files()** — Close all open files.
-- **list_open_files()** — List all files currently in context. ALWAYS call this before opening.
-
-**Editing:**
-- **replace_text(path, old, new, threshold?)** — Fuzzy-match replacement, auto-saves.
-  threshold is Jaro-Winkler similarity (0.0-1.0, default: 0.95). Set validate_syntax=False for
-  non-Python files or intentionally broken code.
-- **batch_edit(path, replacements, threshold?)** — Multiple replacements applied atomically.
-  "Atomic" means: all replacements are computed against the ORIGINAL file, then applied together.
-  If any single replacement fails, NO changes are made (full rollback). This prevents
-  cascading failures when edits depend on each other's line positions.
-  Replacements is a list of {old, new} objects.
-- **delete_snippet(path, snippet, threshold?)** — Remove a snippet, auto-saves.
-- **write_text(path, content, create_parent_dirs?)** — Write content to file, creates if needed.
-- **delete_file(path)** — Delete a file.
-
-**Preview & Diff:**
-- **preview_replace(path, old, threshold?)** — Show where a replacement would match, no changes.
-- **diff_text(path, old, new, threshold?)** — Show before/after diff, no changes.
-
-**Navigation & Info:**
-- **search_files(pattern, path?)** — Grep pattern in files. pattern is a regex. path defaults to ".".
-- **list_dir(path?)** — List directory contents. path defaults to current directory.
-- **file_info(path)** — Get file metadata (size, line count, type).
-- **pwd()** — Show current working directory.
-- **chdir(path)** — Change working directory.
-- **get_file_history(path?)** — Get file change history for this session.
-
-**Git Integration:**
-- **restore_from_git(path)** — Restore file to its last committed state in git.
-  Requires the file to already be git-tracked. Use this to undo unwanted changes.
+""" + _tool_ref('file') + """
 
 ### Workflow
 1. Call list_open_files() to see what's in context
@@ -394,12 +348,6 @@ files.
 - To watch a different file on the same screen: bind it to the new path (binding transfers)
 - Browser tab closed and reopened: binding auto-restores (the server remembers per screen)
 - Call screen_list() anytime to see which screens are bound to which files
-
-**Screen tools:**
-- **screen_list()** — See all screens and their current bindings
-- **screen_bind(path, screen_uid)** — Bind a screen to a file (full snapshot + live diffs)
-- **screen_release(screen_uid)** — Stop broadcasting to a screen (screen goes idle)
-- **screen_status(screen_uid)** — Get detailed per-screen state (bound path, version, etc.)
 
 **When to use screens:**
 - Useful when you want to verify edit results visually without re-reading file context

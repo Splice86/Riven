@@ -16,8 +16,22 @@ from typing import Any
 
 import yaml
 
-from modules import CalledFn, ContextFn, Module
+from modules import CalledFn, ContextFn, Module, _tool_ref
 from modules.project import get_project_root
+
+
+def _planning_help() -> str:
+    """Static tool documentation."""
+    return """## Planning (Help)
+
+Goals track programming tasks. All data lives in `.riven/plan.yaml`.
+
+""" + _tool_ref('planning') + """
+
+### Notes
+- Goals are stored in `.riven/plan.yaml` (versioned with git)
+- Use `add_file_to_goal()` to link files to a goal
+- Active goals and their files appear in context below ({planning})"""
 
 logger = logging.getLogger("modules.planning")
 
@@ -347,5 +361,7 @@ def get_module() -> Module:
                 fn=close_goal,
             ),
         ],
-        context_fns=[],
+        context_fns=[
+            ContextFn(tag="planning_help", fn=_planning_help, static=True),
+        ],
     )

@@ -24,15 +24,14 @@ from core import Core
 
 def _shards_help() -> str:
     """Static tool documentation."""
+    from modules import _tool_ref
     return """## Shards (Help)
-
-### Available Commands
-- **run_shard(shard_name, task, session_id?, timeout?, llm_config?)** - Delegate to another shard
-- **list_shards()** - List all available shards
 
 ### Usage
 Use `run_shard` when a task is better handled by a different shard's specialty
 (e.g., delegating code implementation to codehammer, or test writing to testhammer).
+
+""" + _tool_ref('shards') + """
 
 The sub-shard runs in an isolated memory session derived from your session ID
 so its context doesn't pollute yours.

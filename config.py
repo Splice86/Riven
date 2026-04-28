@@ -15,7 +15,14 @@ Template convention:
 
 import os
 import subprocess
+import time
 from typing import Any
+
+
+def _debug(step: str) -> None:
+    """Print timestamped debug messages for lock-up tracing."""
+    ts = time.time()
+    print(f"[DEBUG {ts:.3f}] [config] {step}", flush=True)
 
 # Cached project root — recomputed if not yet set
 _project_root_cache: dict[str, str | None] = {}
@@ -58,12 +65,17 @@ def _run_git(args: list[str], cwd: str | None = None) -> subprocess.CompletedPro
             cwd = os.path.dirname(cwd)
         if not os.path.isdir(cwd):
             cwd = None  # Fall back to os.getcwd() below
-    return subprocess.run(
+    _debug(f"_run_git: {' '.join(args)} (cwd={cwd or os.getcwd()})")
+    t0 = time.time()
+    result = subprocess.run(
         ['git'] + args,
         capture_output=True,
         text=True,
         cwd=cwd or os.getcwd(),
+        timeout=10,  # 10s timeout to prevent hangs
     )
+    _debug(f"_run_git: done in {time.time()-t0:.3f}s, rc={result.returncode}")
+    return result
 
 
 def _git_toplevel(cwd: str | None = None) -> str | None:
@@ -94,38 +106,50 @@ def find_project_root(from_path: str | None = None) -> str | None:
     """
     global _project_root_cache
     start = os.path.abspath(from_path or os.getcwd())
+    _debug(f"find_project_root({from_path!r}) from {start}")
 
     # Check per-path cache first
     if start in _project_root_cache:
+        _debug(f"find_project_root: cache hit -> {_project_root_cache[start]!r}")
         return _project_root_cache[start]
 
     # 1. Env var override
     env_root = os.environ.get('RV_PROJECT_ROOT')
     if env_root and os.path.isdir(env_root):
         _project_root_cache[start] = os.path.abspath(env_root)
+        _debug(f"find_project_root: env override -> {_project_root_cache[start]!r}")
         return _project_root_cache[start]
 
     # 2. Walk up looking for .riven/ (riven project takes priority)
     for directory in _walk_up(start):
-        if os.path.isdir(os.path.join(directory, RIVEN_DIR)):
+        riven_path = os.path.join(directory, RIVEN_DIR)
+        _debug(f"find_project_root: checking {riven_path}")
+        if os.path.isdir(riven_path):
             _project_root_cache[start] = directory
+            _debug(f"find_project_root: found .riven/ at {directory}")
             return _project_root_cache[start]
 
     # 3. Walk up looking for .git/ (existing git repo without .riven/)
     for directory in _walk_up(start):
-        if os.path.isdir(os.path.join(directory, '.git')):
+        git_path = os.path.join(directory, '.git')
+        _debug(f"find_project_root: checking {git_path}")
+        if os.path.isdir(git_path):
             _project_root_cache[start] = directory
+            _debug(f"find_project_root: found .git/ at {directory}")
             return _project_root_cache[start]
 
     # 4. Git toplevel fallback (only if from_path is inside a git work tree)
+    _debug(f"find_project_root: falling back to _git_toplevel")
     git_root = _git_toplevel(start)
     if git_root:
         _project_root_cache[start] = git_root
+        _debug(f"find_project_root: git toplevel -> {git_root}")
         return _project_root_cache[start]
 
+    # Not found
     _project_root_cache[start] = None
+    _debug(f"find_project_root: not found")
     return None
-
 
 def clear_project_root_cache() -> None:
     """Clear the cached project roots. Call after create_project."""

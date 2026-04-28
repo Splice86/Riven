@@ -294,17 +294,12 @@ async def execute_sql(sql: str, params: Optional[list] = None) -> str:
 
 def _memory_help() -> str:
     """Static tool documentation - does not change between calls."""
+    from modules import _tool_ref
     return """## Memory Tools (Help)
 
 Use these tools to store and retrieve persistent memories:
-- **add_memory(content, keywords?, properties?)** - Store a new memory
-- **search_memories(query, limit?)** - Search with DSL query
-- **get_memory(memory_id)** - Get specific memory by ID
-- **list_memories(limit?)** - List recent memories
-- **delete_memory(memory_id)** - Delete a memory
-- **update_memory(memory_id, properties?, keywords?)** - Update metadata
-- **add_link(source_id, target_id, link_type?)** - Link two memories
-- **get_memory_stats()** - Get database statistics
+
+""" + _tool_ref('memory') + """
 
 Query DSL: k:keyword (exact), s:keyword (semantic), q:text (semantic search),
 d:date (date filter), p:key=value (property filter). Use AND/OR/NOT operators."""

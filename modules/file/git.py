@@ -6,7 +6,7 @@ Provides utilities for:
 - Getting content-based git hashes for conflict detection
 - Generating actionable git warnings
 
-All git operations run from the project root (find_project_root), not from
+All git operations run from the git toplevel (found via _git_toplevel), not from
 the file's parent directory. This ensures correct relative paths regardless
 of how deeply a file is nested.
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from config import find_project_root
+from config import _git_toplevel, _run_git
 
 
 # =============================================================================
@@ -45,12 +45,17 @@ def _is_git_repo(cwd: str | None = None) -> bool:
 def _is_git_tracked(path: str) -> bool:
     """Check if a file is tracked by git.
 
-    Runs git ls-files --error-unmatch from the project root using the
-    relative path from project root. This works correctly at any nesting depth.
+    Uses git rev-parse --show-toplevel from the file's directory to find the
+    actual git repo root (not the riven project root). Then uses git ls-files
+    --error-unmatch with the relative path. Works correctly at any nesting depth.
     """
     abs_path = os.path.abspath(path)
-    root = find_project_root(abs_path)
-    if root is None or not os.path.isdir(root):
+
+    # Find the actual git repo root (not the riven project root).
+    # This handles the case where ~/.riven/ exists but the real git repo
+    # is deeper, e.g. riven_core/.git.
+    root = _git_toplevel(abs_path)
+    if root is None:
         return False
 
     # git ls-files needs the relative path from repo root
@@ -71,8 +76,8 @@ def _get_git_hash(path: str) -> str | None:
     This hash depends only on the file content (blob SHA), not working-tree state.
     """
     abs_path = os.path.abspath(path)
-    root = find_project_root(abs_path)
-    if root is None or not os.path.isdir(root):
+    root = _git_toplevel(abs_path)
+    if root is None:
         return None
 
     try:
@@ -89,8 +94,8 @@ def _get_git_hash(path: str) -> str | None:
 def _git_status(path: str) -> str:
     """Get the short git status code for a file (e.g. ' M', '??', 'A ')."""
     abs_path = os.path.abspath(path)
-    root = find_project_root(abs_path)
-    if root is None or not os.path.isdir(root):
+    root = _git_toplevel(abs_path)
+    if root is None:
         return ''
 
     try:
@@ -124,9 +129,13 @@ def _git_status_summary(cwd: str | None = None) -> str:
 def _git_warning(path: str, abs_path: str) -> str:
     """Generate an actionable warning when a file is not git-tracked."""
     filename = os.path.basename(path)
-    root = find_project_root(abs_path)
 
-    if root is None or not os.path.isdir(root) or not _is_git_repo(root):
+    # _is_git_tracked already checked with _git_toplevel — if we got here,
+    # a git repo exists but the file isn't tracked. Use _git_toplevel for
+    # consistency in the warning.
+    root = _git_toplevel(abs_path)
+
+    if root is None:
         return (
             f"⚠️  Cannot safely open {filename} — no git repository found.\n\n"
             f"    Safe file editing (automatic rollback on validation failure) requires git.\n"

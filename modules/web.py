@@ -193,12 +193,10 @@ async def web_search(query: str, num_results: int = 10) -> str:
 
 def _web_help() -> str:
     """Static tool documentation - does not change between calls."""
+    from modules import _tool_ref
     return """## Web Tools (Help)
 
-Access web content using these tools:
-- **fetch_page(url)** - Get page content as text via lynx
-- **fetch_page_links(url)** - Extract all links from a page
-- **web_search(query, num_results?)** - Search DuckDuckGo
+""" + _tool_ref('web') + """
 
 Note: Requires lynx to be installed (`apt install lynx`)."""
 
