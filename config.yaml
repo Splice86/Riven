@@ -59,6 +59,7 @@ default_shard: codehammer
 
 # Modules available globally
 modules:
+  - project
   - time
   - file
   - shell

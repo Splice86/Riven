@@ -5,16 +5,21 @@ Provides utilities for:
 - Checking if a file is git-tracked
 - Getting content-based git hashes for conflict detection
 - Generating actionable git warnings
-- Initialising git tracking for a file
 
-All functions are standalone (no class dependencies) so they can be used
-by both FileEditor and any other module that needs git checks.
+All git operations run from the project root (find_project_root), not from
+the file's parent directory. This ensures correct relative paths regardless
+of how deeply a file is nested.
+
+These functions are standalone (no class dependencies) so they can be used
+by FileEditor and any other module that needs git checks.
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
+
+from config import find_project_root
 
 
 # =============================================================================
@@ -40,17 +45,22 @@ def _is_git_repo(cwd: str | None = None) -> bool:
 def _is_git_tracked(path: str) -> bool:
     """Check if a file is tracked by git.
 
-    Uses git ls-files --error-unmatch which returns 0 only for tracked files,
-    regardless of working-tree state. The canonical approach.
+    Runs git ls-files --error-unmatch from the project root using the
+    relative path from project root. This works correctly at any nesting depth.
     """
     abs_path = os.path.abspath(path)
-    parent = os.path.dirname(abs_path)
-    basename = os.path.basename(abs_path)
-    result = subprocess.run(
-        ['git', 'ls-files', '--error-unmatch', '--', basename],
-        cwd=parent,
-        capture_output=True,
-    )
+    root = find_project_root(abs_path)
+    if root is None:
+        return False
+
+    # git ls-files needs the relative path from repo root
+    try:
+        relative = os.path.relpath(abs_path, root)
+    except ValueError:
+        # Cross-device path — rare, treat as untracked
+        return False
+
+    result = _run_git(['ls-files', '--error-unmatch', '--', relative], cwd=root)
     return result.returncode == 0
 
 
@@ -61,8 +71,16 @@ def _get_git_hash(path: str) -> str | None:
     This hash depends only on the file content (blob SHA), not working-tree state.
     """
     abs_path = os.path.abspath(path)
-    parent = os.path.dirname(abs_path)
-    result = _run_git(['hash-object', '--', os.path.basename(abs_path)], cwd=parent)
+    root = find_project_root(abs_path)
+    if root is None:
+        return None
+
+    try:
+        relative = os.path.relpath(abs_path, root)
+    except ValueError:
+        return None
+
+    result = _run_git(['hash-object', '--', relative], cwd=root)
     if result.returncode == 0:
         return result.stdout.strip()
     return None
@@ -70,7 +88,17 @@ def _get_git_hash(path: str) -> str | None:
 
 def _git_status(path: str) -> str:
     """Get the short git status code for a file (e.g. ' M', '??', 'A ')."""
-    result = _run_git(['status', '-s', '--', path])
+    abs_path = os.path.abspath(path)
+    root = find_project_root(abs_path)
+    if root is None:
+        return ''
+
+    try:
+        relative = os.path.relpath(abs_path, root)
+    except ValueError:
+        return ''
+
+    result = _run_git(['status', '-s', '--', relative], cwd=root)
     if result.returncode == 0:
         lines = result.stdout.strip().split('\n')
         if lines and lines[0]:
@@ -96,76 +124,27 @@ def _git_status_summary(cwd: str | None = None) -> str:
 def _git_warning(path: str, abs_path: str) -> str:
     """Generate an actionable warning when a file is not git-tracked."""
     filename = os.path.basename(path)
-    work_dir = os.path.dirname(abs_path) or '.'
+    root = find_project_root(abs_path)
 
-    if not _is_git_repo(work_dir):
+    if root is None or not _is_git_repo(root):
         return (
             f"⚠️  Cannot safely open {filename} — no git repository found.\n\n"
-            f"    Safe file editing (automatic rollback on validation failure) requires git.\n\n"
+            f"    Safe file editing (automatic rollback on validation failure) requires git.\n"
+            f"    The current directory is not inside a git repository.\n\n"
             f"    To fix this, run:\n\n"
-            f"      1. git init\n"
-            f"      2. git add {filename}\n"
-            f"      3. git commit -m 'initial'\n\n"
-            f"    Or use the init_git_for_file(path) tool and I'll run these for you.\n\n"
-            f"    Alternatively, open a file that IS inside an existing git repository."
+            f"      1. cd to your project root\n"
+            f"      2. git init\n"
+            f"      3. git add {filename}\n"
+            f"      4. git commit -m 'initial'\n\n"
+            f"    Or use create_project() which handles this automatically."
         )
     else:
         return (
             f"⚠️  Cannot safely open {filename} — file is not tracked by git.\n\n"
-            f"    Safe file editing (automatic rollback on validation failure) requires git.\n\n"
+            f"    Safe file editing (automatic rollback on validation failure) requires git.\n"
+            f"    {filename} exists but is not in the git index.\n\n"
             f"    To fix this, run:\n\n"
-            f"      1. git add {path}\n"
-            f"      2. git commit -m 'track {filename}'\n\n"
-            f"    Or use the init_git_for_file(path) tool and I'll run these for you.\n\n"
-            f"    Alternatively, open a file that IS tracked by git."
+            f"      git add {path}\n"
+            f"      git commit -m 'track {filename}'\n\n"
+            f"    Or use create_project() which handles this automatically."
         )
-
-
-# =============================================================================
-# init_git_for_file — the tool implementation
-# =============================================================================
-
-async def init_git_for_file(path: str) -> str:
-    """Initialize git tracking for a file to enable safe rollback.
-
-    If the workspace has no git repo, runs git init first.
-    Then stages and commits the file so it can be safely edited.
-
-    Call this when open_file fails with a git-tracking warning.
-    """
-    abs_path = os.path.abspath(os.path.expanduser(path))
-    filename = os.path.basename(abs_path)
-    work_dir = os.path.dirname(abs_path) or '.'
-
-    if not os.path.exists(abs_path):
-        return f"Error: File {abs_path} not found"
-
-    # Step 1: git init if needed
-    if not _is_git_repo(work_dir):
-        result = _run_git(['init'], cwd=work_dir)
-        if result.returncode != 0:
-            return f"Failed to git init: {result.stderr}"
-
-    # Step 2: git add
-    result = _run_git(['add', '--', os.path.basename(abs_path)], cwd=work_dir)
-    if result.returncode != 0:
-        return f"Failed to git add {filename}: {result.stderr}"
-
-    # Step 3: git commit
-    result = _run_git(
-        ['commit', '-m', f'Track {filename} for safe editing'],
-        cwd=work_dir,
-    )
-    if result.returncode != 0:
-        if 'nothing to commit' in result.stdout:
-            return (
-                f"⚠️  {filename} is already tracked by git (nothing new to commit).\n"
-                f"    Try open_file('{path}') again."
-            )
-        return f"Failed to git commit: {result.stderr}"
-
-    return (
-        f"✅ Git tracking enabled for {filename}.\n\n"
-        f"    You can now open the file with open_file('{path}') and edits\n"
-        f"    will have automatic rollback protection on validation failure."
-    )

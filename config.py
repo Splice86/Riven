@@ -14,11 +14,101 @@ Template convention:
 """
 
 import os
+import subprocess
 from typing import Any
+
+# Cached project root — recomputed if not yet set
+_project_root_cache: str | None = None
+
+# The riven project data directory
+RIVEN_DIR = ".riven"
+
+
+def _walk_up(path: str, stop_at: str | None = None) -> list[str]:
+    """Walk from path up to stop_at (or filesystem root), yield each dir."""
+    parts = []
+    current = os.path.abspath(path)
+    stop = os.path.abspath(stop_at) if stop_at else None
+    while current and current != stop:
+        parts.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return parts
+
+
+def _run_git(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
+    """Run a git command, returning the result. Errors are silenced."""
+    return subprocess.run(
+        ['git'] + args,
+        capture_output=True,
+        text=True,
+        cwd=cwd or os.getcwd(),
+    )
+
+
+def _git_toplevel(cwd: str | None = None) -> str | None:
+    """Return git root via rev-parse, or None if not in a repo."""
+    result = _run_git(['rev-parse', '--show-toplevel'], cwd=cwd)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
+
+
+def _is_git_repo(cwd: str | None = None) -> bool:
+    """Check if cwd (or cwd=os.getcwd()) is inside a git working tree."""
+    result = _run_git(['rev-parse', '--is-inside-work-tree'], cwd=cwd)
+    return result.returncode == 0 and 'true' in result.stdout.lower()
+
+
+def find_project_root(from_path: str | None = None) -> str | None:
+    """Find the riven project root by walking up from from_path.
+
+    Discovery order:
+      1. RV_PROJECT_ROOT env var (explicit override)
+      2. .riven/ directory (primary — this IS the project root)
+      3. git rev-parse --show-toplevel (fallback for git repos without .riven/)
+      4. .riven/ or .git/ walk from from_path upward
+
+    Returns None if no project found.
+    Result is cached after first call.
+    """
+    global _project_root_cache
+    if _project_root_cache:
+        return _project_root_cache
+
+    # 1. Env var override
+    env_root = os.environ.get('RV_PROJECT_ROOT')
+    if env_root and os.path.isdir(env_root):
+        _project_root_cache = os.path.abspath(env_root)
+        return _project_root_cache
+
+    start = os.path.abspath(from_path or os.getcwd())
+
+    # 2. Check for .riven/ at start and walk up
+    for directory in _walk_up(start):
+        if os.path.isdir(os.path.join(directory, RIVEN_DIR)):
+            _project_root_cache = directory
+            return _project_root_cache
+
+    # 3. Git toplevel fallback
+    git_root = _git_toplevel(start)
+    if git_root:
+        _project_root_cache = git_root
+        return _project_root_cache
+
+    return None
+
+
+def clear_project_root_cache() -> None:
+    """Clear the cached project root. Call after create_project."""
+    global _project_root_cache
+    _project_root_cache = None
 
 
 def _find_project_root() -> str:
-    """Find the project root (where config.yaml lives)."""
+    """Find the riven_core installation root (where config.yaml lives)."""
     return os.path.dirname(os.path.abspath(__file__))
 
 
