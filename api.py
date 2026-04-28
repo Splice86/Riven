@@ -7,6 +7,7 @@ The API is stateless; all conversation history lives in the Memory API.
 import asyncio
 import glob
 import importlib
+import logging
 import json
 import os
 import pkgutil
@@ -21,6 +22,8 @@ from pydantic import BaseModel
 
 from core import Core
 from config import get_llm_config, get
+
+logger = logging.getLogger(__name__)
 
 # High-level debug flag
 DEBUG_HANG = False
@@ -544,10 +547,11 @@ def _discover_modules():
             mod = importlib.import_module(f"modules.{name}")
             if hasattr(mod, "register_routes"):
                 discovered.append(name)
-                pass  # Module discovery logged silently
+                logger.debug(f"Discovered module with routes: {name}")
         except Exception as e:
-            pass  # Module load failure handled silently
+            logger.warning(f"[API] Failed to discover module '{name}': {e}")
 
+    logger.info(f"[API] Discovered {len(discovered)} module(s) with routes: {discovered}")
     return discovered
 
 
@@ -556,9 +560,10 @@ def _register_module_routes(app, module_name: str):
     try:
         mod = importlib.import_module(f"modules.{module_name}")
         mod.register_routes(app)
+        logger.info(f"[API] Registered routes for module: {module_name}")
         return True
     except Exception as e:
-        pass  # Route registration failure handled silently
+        logger.warning(f"[API] Failed to register routes for module '{module_name}': {e}")
         return False
 
 

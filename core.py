@@ -189,6 +189,7 @@ class Core:
         """Load modules listed in shard."""
         _debug(f"_load_modules: clearing registry, loading {self._module_names}", session_id)
         registry._modules.clear()
+        loaded, failed = [], []
         for name in self._module_names:
             _debug(f"_load_modules: importing modules.{name}", session_id)
             try:
@@ -197,13 +198,21 @@ class Core:
                 if hasattr(mod, 'get_module'):
                     module = mod.get_module()
                     registry.register(module)
+                    loaded.append(name)
                     _debug(f"_load_modules: registered module '{name}'", session_id)
                 else:
                     _debug(f"_load_modules: modules.{name} has no get_module, skipping", session_id)
+                    failed.append(f"{name} (no get_module)")
             except Exception as e:
                 _debug(f"_load_modules: FAILED to load {name}: {e}", session_id)
-                logger.warning(f"Failed to load module {name}: {e}")
-        _debug(f"_load_modules: done, registry has {list(registry._modules.keys())}", session_id)
+                logger.warning(f"[Module] FAILED to load '{name}': {e}")
+                failed.append(f"{name} ({e})")
+        loaded_names = list(registry._modules.keys())
+        _debug(f"_load_modules: done, registry has {loaded_names}", session_id)
+        if failed:
+            logger.warning(f"[Module] Load complete — {len(loaded)} OK, {len(failed)} FAILED: {failed}")
+        else:
+            logger.info(f"[Module] All {len(loaded)} modules loaded: {loaded}")
 
     def _get_functions(self, session_id: str = None) -> list[Function]:
         """Convert registry called_fns to Core Functions."""
