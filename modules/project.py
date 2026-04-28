@@ -76,8 +76,9 @@ def _read_project() -> tuple[dict, str]:
     err = _ensure_project_file()
     if err:
         return {}, err
+    path = _project_path()  # Cache — avoid calling twice
     try:
-        with open(_project_path()) as f:
+        with open(path) as f:
             return yaml.safe_load(f) or {}, ""
     except yaml.YAMLError as e:
         return {}, f"[ERROR] project.yaml is malformed: {e}"
@@ -171,7 +172,7 @@ async def create_project(path: str | None = None) -> str:
         if result.returncode != 0:
             return f"[ERROR] git init failed: {result.stderr}"
         # Commit .riven/ so it's tracked from the start (fresh repo only)
-        _run_git(['add', '.riven/project.yaml'], cwd=target)
+        _run_git(['add', '.riven/'], cwd=target)
         commit_result = _run_git(['commit', '-m', 'Initialize riven project'], cwd=target)
         if commit_result.returncode != 0:
             pass  # Non-fatal for fresh repos too
