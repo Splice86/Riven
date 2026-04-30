@@ -69,7 +69,6 @@ from modules.file.memory import (
 
 # Screen subsystem
 from modules.file.screens import (
-    screen_list,
     screen_bind,
     screen_release,
     screen_status,
@@ -316,7 +315,7 @@ def screen_context() -> str:
         return (
             f"[Screens] No screens registered for this session.\n"
             f"Open http://localhost:{port}/module/file/screens "
-            f"in a browser tab, then call screen_list() to see the UID."
+            f"in a browser tab. Screen UIDs are shown in the [Screens] context block above."
         )
 
     lines = [f"[Screens] {len(screens)} screen(s) online for this session:"]
@@ -386,7 +385,7 @@ files.
 - A screen stays bound to its file across edits until you call screen_release()
 - To watch a different file on the same screen: bind it to the new path (binding transfers)
 - Browser tab closed and reopened: binding auto-restores (the server remembers per screen)
-- Call screen_list() anytime to see which screens are bound to which files
+- Screen UIDs are visible in the [Screens] context block at the top of the prompt
 
 **When to use screens:**
 - Useful when you want to verify edit results visually without re-reading file context
@@ -762,19 +761,13 @@ def get_module() -> Module:
                 fn=chdir,
             ),
             CalledFn(
-                name="screen_list",
-                description="List all screens registered to this Riven session.\n\nShows screen UIDs, binding status, and online/offline state.\nUse screen_bind() to bind a screen to a file for live edit broadcasts.",
-                parameters={"type": "object", "properties": {}},
-                fn=screen_list,
-            ),
-            CalledFn(
                 name="screen_bind",
                 description="Bind a screen to a file for live edit broadcasts.\n\nOnce bound, the screen receives a full file snapshot, then incremental diffs\non every edit. The screen will remain bound until explicitly released.\n\nArgs:\n- path: Path to the file\n- screen_uid: UID of the screen to bind (from screen_list())\n- section: Optional line range (e.g., '0-30') for partial view",
                 parameters={
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "Path to the file"},
-                        "screen_uid": {"type": "string", "description": "Screen UID from screen_list()"},
+                        "screen_uid": {"type": "string", "description": "Screen UID shown in the [Screens] context block above"},
                         "section": {"type": "string", "description": "Line range (e.g., '0-30') or None for full file"}
                     },
                     "required": ["path", "screen_uid"]
@@ -900,7 +893,6 @@ __all__ = [
     "_git_warning",
     "_git_status_summary",
     # Screen broadcast functions
-    "screen_list",
     "screen_bind",
     "screen_release",
     "screen_status",
