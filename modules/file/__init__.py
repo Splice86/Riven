@@ -300,16 +300,15 @@ async def get_file_history(path: str = None) -> str:
 def screen_context() -> str:
     """Context function that injects current screen status for the session.
 
-    Reads live screen data from the sync-accessible session cache so it can be
-    called from the synchronous context-building path.
+    Reads live screen data from the registry (sync, no session filter) so it
+    can be called from the synchronous context-building path.
     """
     from config import get
-    session_id = get_session_id()
     port = get('server.port', 8000)
 
     try:
-        from modules.file.screens import get_session_screens_sync
-        screens = get_session_screens_sync(session_id)
+        from modules.file.screens import get_all_screens_sync
+        screens = get_all_screens_sync()
     except Exception:
         return f"[Screens] No screens available. Open http://localhost:{port}/module/file/screens to register a screen."
 
@@ -322,9 +321,8 @@ def screen_context() -> str:
 
     lines = [f"[Screens] {len(screens)} screen(s) online for this session:"]
     for s in screens:
-        bound = s.get("bound_path")
-        status = f"bound to {bound}" if bound else "idle (no file)"
-        lines.append(f"  [{s['uid']}] {s['client_name']} — {status}")
+        status = f"bound to {s.bound_path}" if s.bound_path else "idle (no file)"
+        lines.append(f"  [{s.uid}] {s.client_name} — {status}")
 
     lines.append("")
     lines.append(f"Call screen_bind(\"<path\", \"<uid>\") to bind a screen to a file.")

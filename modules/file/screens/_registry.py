@@ -178,5 +178,15 @@ registry = ScreenRegistry()
 
 
 def get_session_screens_sync(session_id: str) -> list[dict]:
-    """Sync read of session screens — called by screen_context()."""
+    """Sync read of session-scoped cache — called by screen_context()."""
     return _session_screens.get(session_id, [])
+
+
+def get_all_screens_sync() -> list[ScreenConnection]:
+    """Sync read of all connected ScreenConnection objects.
+
+    Reads _connections directly without acquiring the async lock — safe
+    because dict reads are thread-safe in CPython and this is only called
+    from the synchronous context-building path (between async call yields).
+    """
+    return list(registry._connections.values())
