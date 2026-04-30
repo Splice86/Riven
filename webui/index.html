@@ -214,11 +214,19 @@
 
     if (role === 'user' || role === 'assistant') {
       const label = role === 'assistant' ? 'Riven' : 'User';
-      const rendered = role === 'assistant' ? parseMarkdown(content) : escapeHtml(cleanContent(content));
-      div.innerHTML = `
-        <div class="message-role">${label}</div>
-        <div class="message-content">${rendered}</div>
-      `;
+      if (role === 'assistant') {
+        // Two-div streaming: raw text accumulator (hidden) + rendered output (visible)
+        div.innerHTML = `
+          <div class="message-role">${label}</div>
+          <div class="message-content"></div>
+          <div class="raw-accum" style="display:none" aria-hidden="true"></div>
+        `;
+      } else {
+        div.innerHTML = `
+          <div class="message-role">${label}</div>
+          <div class="message-content">${escapeHtml(cleanContent(content))}</div>
+        `;
+      }
     } else if (role === 'thinking') {
       div.innerHTML = `
         <div class="thinking-header">
@@ -248,19 +256,44 @@
   }
 
   function streamToken(token) {
-    // Skip empty tokens
     const cleaned = cleanToken(token);
     if (!cleaned) return;
-    
+
     const msgs = document.getElementById('messages');
     let last = msgs.lastElementChild;
     if (!last || !last.classList.contains('assistant') || last.dataset.streaming !== 'true') {
       last = appendMessage('assistant', '');
       last.dataset.streaming = 'true';
     }
-    const contentDiv = last.querySelector('.message-content');
-    contentDiv.textContent += cleaned;
+
+    // Append raw text to hidden accumulator
+    const rawEl = last.querySelector('.raw-accum');
+    if (rawEl) rawEl.textContent += cleaned;
+
+    // Schedule a render cycle (throttled to rAF — ~60fps)
+    scheduleMarkdownRender(last);
     scrollToBottom();
+  }
+
+  // ── Live markdown render loop ─────────────────────────────
+  // Reads raw text from .raw-accum, renders markdown to .message-content
+  // via requestAnimationFrame so it runs at ~60fps regardless of token rate.
+  let _pendingRenders = new Set();
+  let _rafScheduled = false;
+
+  function scheduleMarkdownRender(msgEl) {
+    _pendingRenders.add(msgEl);
+    if (_rafScheduled) return;
+    _rafScheduled = true;
+    requestAnimationFrame(() => {
+      _rafScheduled = false;
+      _pendingRenders.forEach(el => {
+        const raw = el.querySelector('.raw-accum');
+        const out = el.querySelector('.message-content');
+        if (raw && out) out.innerHTML = parseMarkdown(raw.textContent || '');
+      });
+      _pendingRenders.clear();
+    });
   }
 
   // ── SSE streaming ────────────────────────────────────────
@@ -352,16 +385,10 @@
             showError(event.error);
           }
           else if (event.done !== undefined) {
-            // Re-parse streamed raw text as markdown now that stream is complete
             const msgs = document.getElementById('messages');
             const last = msgs.lastElementChild;
             if (last && last.dataset.streaming === 'true') {
               last.dataset.streaming = 'false';
-              const contentDiv = last.querySelector('.message-content');
-              if (contentDiv) {
-                const raw = contentDiv.textContent || '';
-                contentDiv.innerHTML = parseMarkdown(raw);
-              }
             }
           }
         }
